@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: maintainerd
+  labels:
+    app: maintainerd
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ .Values.deployment.syncWave | quote }}
+spec:
+  selector:
+    app: maintainerd
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.port }}
+      protocol: TCP
+  type: ClusterIP

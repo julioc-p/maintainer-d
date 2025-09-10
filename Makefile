@@ -64,17 +64,9 @@ help:
 	@echo "make argocd-ui       -> port-forward Argo CD UI to https://localhost:8088"
 	@echo "make ensure-ns       -> ensure namespace $(NAMESPACE) exists"
 	@echo "make apply-ghcr-secret -> create/update docker-registry Secret 'ghcr-secret'"
-	@echo "make apply-pvc       -> apply base PVC into ns $(NAMESPACE)"
-	@echo "make bootstrap-apply -> apply base bootstrap Job into ns $(NAMESPACE)"
-	@echo "make bootstrap-wait  -> wait for bootstrap Job completion"
-	@echo "make bootstrap-restart-> delete and re-run bootstrap Job"
-	@echo "make cluster-up      -> kind-up + ns + ghcr secret + secrets + pvc + bootstrap"
-	@echo "make maintainerd-apply -> apply base Deployment + Service + Ingress"
-	@echo "make kustomize-base-apply -> apply all base resources with kustomize"
-	@echo "make kustomize-diff-prod   -> diff prod overlay against cluster"
-	@echo "make kustomize-diff-dev    -> diff dev overlay against cluster"
-	@echo "make kustomize-dryrun-prod -> server-side dry-run apply (prod)"
-	@echo "make kustomize-dryrun-dev  -> server-side dry-run apply (dev)"
+	@echo "make helm-template  -> render Helm chart with values-prod"
+	@echo "make helm-upgrade   -> install/upgrade chart locally (optional)"
+	@echo "make cluster-up     -> kind-up + ns + ghcr secret + secrets + Argo CD apps"
 	@echo "make maintainerd-delete -> delete Deployment/Service maintainerd"
 	@echo "make maintainerd-restart -> rollout restart Deployment/maintainerd"
 	@echo "make maintainerd-port-forward -> forward :2525 -> svc/maintainerd:2525"
@@ -138,7 +130,7 @@ kind-down:
 	@echo "Deleting kind cluster 'maintainerd'"
 	@kind delete cluster --name maintainerd || true
 
-# ---- Kubernetes resources for bootstrap ----
+## ---- Cluster helpers ----
 .PHONY: ensure-ns
 ensure-ns:
 	@kubectl get ns $(NAMESPACE) >/dev/null 2>&1 \
@@ -155,28 +147,6 @@ apply-ghcr-secret:
 		--docker-password=$(DOCKER_REGISTRY_PASSWORD) \
 		$(if $(KUBECONTEXT),--context $(KUBECONTEXT)) \
 		--dry-run=client -o yaml | kubectl -n $(NAMESPACE) apply -f -
-
-.PHONY: apply-pvc
-apply-pvc:
-	@echo "Applying deploy/kustomize/base/pvc.yaml to namespace $(NAMESPACE)"
-	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/kustomize/base/pvc.yaml
-
-.PHONY: bootstrap-apply
-bootstrap-apply:
-	@echo "Applying deploy/kustomize/base/bootstrap.yaml Job to namespace $(NAMESPACE)"
-	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/kustomize/base/bootstrap.yaml
-
-.PHONY: bootstrap-wait
-bootstrap-wait:
-	@echo "Waiting for Job/maintainerd-bootstrap to complete in $(NAMESPACE)"
-	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) wait --for=condition=complete --timeout=5m job/maintainerd-bootstrap
-
-.PHONY: bootstrap-restart
-bootstrap-restart:
-	@echo "Deleting and re-applying bootstrap Job"
-	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) delete job/maintainerd-bootstrap --ignore-not-found=true
-	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/kustomize/base/bootstrap.yaml
-	@$(MAKE) bootstrap-wait
 
 # ---- Argo CD install (cluster add-on) ----
 .PHONY: argocd-install
@@ -206,10 +176,9 @@ argo-bootstrap:
 	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/argocd/app-metallb.yaml
 	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/argocd/app-metallb-config.yaml
 	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/argocd/app-ingress-nginx.yaml
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/argocd/app-maintainerd-dev.yaml
 	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/argocd/app-maintainerd-prod.yaml
 	@echo "Argo apps applied. Open the Argo CD UI to monitor syncs."
-
+ 
 # ---- ingress controller (nginx) for kind ----
 .PHONY: ingress-nginx-install
 ingress-nginx-install:
@@ -218,47 +187,27 @@ ingress-nginx-install:
 	@echo "Waiting for ingress controller to be Ready"
 	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) -n ingress-nginx wait --for=condition=Ready pod -l app.kubernetes.io/component=controller --timeout=180s
 
-# High-level: bring up full local stack for bootstrap
+# High-level: bring up full local stack for bootstrap (via Argo CD + Helm chart)
 .PHONY: cluster-up
-cluster-up: kind-up ensure-ns apply-ghcr-secret secrets apply-pvc bootstrap-apply
-	@echo "Cluster ready. Use 'make bootstrap-wait' to wait for job."
+cluster-up: kind-up ensure-ns apply-ghcr-secret secrets argo-bootstrap
+	@echo "Cluster ready. Argo CD will sync the Helm chart."
 
 .PHONY: cluster-down
 cluster-down: kind-down
 	@echo "Cluster 'maintainerd' deleted"
 
-# ---- maintainerd server deployment ----
-.PHONY: maintainerd-apply
-maintainerd-apply: bootstrap-wait ingress-nginx-install
-	@echo "Applying deploy/kustomize/base/maintainerd.yaml to namespace $(NAMESPACE)"
-	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/kustomize/base/maintainerd.yaml
+## ---- Helm helpers (local render/install) ----
+.PHONY: helm-template
+helm-template:
+	@echo "Rendering Helm chart (values-prod.yaml)"
+	@helm template maintainerd deploy/helm/maintainerd -f deploy/helm/maintainerd/values-prod.yaml \
+		$(if $(NAMESPACE),--namespace $(NAMESPACE)) > /dev/null && echo "Rendered OK"
 
-# ---- kustomize base (apply all base resources) ----
-.PHONY: kustomize-base-apply
-kustomize-base-apply:
-	@echo "Applying Kustomize base (deploy/kustomize/base) to namespace $(NAMESPACE)"
-	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -k deploy/kustomize/base
-
-# ---- kustomize validation helpers ----
-.PHONY: kustomize-diff-prod
-kustomize-diff-prod:
-	@echo "Diffing prod overlay against cluster (ns=$(NAMESPACE))"
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) -n $(NAMESPACE) diff -k deploy/kustomize/overlays/prod || true
-
-.PHONY: kustomize-diff-dev
-kustomize-diff-dev:
-	@echo "Diffing dev overlay against cluster (ns=$(NAMESPACE))"
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) -n $(NAMESPACE) diff -k deploy/kustomize/overlays/dev || true
-
-.PHONY: kustomize-dryrun-prod
-kustomize-dryrun-prod: ensure-ns
-	@echo "Server-side dry-run for prod overlay (ns=$(NAMESPACE))"
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) -n $(NAMESPACE) apply --dry-run=server -k deploy/kustomize/overlays/prod
-
-.PHONY: kustomize-dryrun-dev
-kustomize-dryrun-dev: ensure-ns
-	@echo "Server-side dry-run for dev overlay (ns=$(NAMESPACE))"
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) -n $(NAMESPACE) apply --dry-run=server -k deploy/kustomize/overlays/dev
+.PHONY: helm-upgrade
+helm-upgrade:
+	@echo "helm upgrade --install maintainerd"
+	@helm upgrade --install maintainerd deploy/helm/maintainerd -f deploy/helm/maintainerd/values-prod.yaml \
+		--namespace $(NAMESPACE) $(if $(KUBECONTEXT),--kube-context $(KUBECONTEXT)) --create-namespace
 
 .PHONY: maintainerd-delete
 maintainerd-delete:

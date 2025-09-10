@@ -1,0 +1,42 @@
+image:
+  repository: ghcr.io/robertkielty/maintainerd
+  tag: latest
+  pullPolicy: Always
+
+imagePullSecrets:
+  - name: ghcr-secret
+
+service:
+  port: 2525
+
+ingress:
+  enabled: true
+  className: nginx
+  host: maintainerd.localtest.me
+  path: /webhook
+
+pvc:
+  enabled: true
+  name: maintainerd-db
+  storage: 1Gi
+
+envFromSecret: maintainerd-bootstrap-env
+credsSecret: workspace-credentials
+
+db:
+  path: /data/maintainers.db
+
+bootstrap:
+  enabled: true
+  # Job sync order (Argo CD) via annotation
+  syncWave: "-1"
+
+deployment:
+  replicas: 1
+  # Deployment/Service sync wave
+  syncWave: "1"
+
+ingressSyncWave: "2"
+pvcSyncWave: "-2"
+
+resources: {}
