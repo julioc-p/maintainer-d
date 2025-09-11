@@ -56,17 +56,14 @@ help:
 	@echo "make apply-creds     -> create/update $(CREDS_SECRET_NAME) from $(CREDS_FILE)"
 	@echo "make clean-env       -> remove $(ENVOUT)"
 	@echo "make print           -> show which keys would be loaded (without values)"
-	@echo "make kind-up         -> create kind cluster 'maintainerd' and install Argo CD"
+	@echo "make kind-up         -> create kind cluster 'maintainerd'"
 	@echo "make kind-down       -> delete kind cluster 'maintainerd'"
 	@echo "make image           -> build+push $(IMAGE), then restart Deployment if kind up"
-	@echo "make argocd-install  -> install Argo CD into the cluster"
-	@echo "make argo-bootstrap  -> apply Argo CD project and applications (deploy/argocd)"
-	@echo "make argocd-ui       -> port-forward Argo CD UI to https://localhost:8088"
 	@echo "make ensure-ns       -> ensure namespace $(NAMESPACE) exists"
 	@echo "make apply-ghcr-secret -> create/update docker-registry Secret 'ghcr-secret'"
-	@echo "make helm-template  -> render Helm chart with values-prod"
-	@echo "make helm-upgrade   -> install/upgrade chart locally (optional)"
-	@echo "make cluster-up     -> kind-up + ns + ghcr secret + secrets + Argo CD apps"
+	@echo "make manifests-apply -> kubectl apply -f deploy/manifests (prod-only)"
+	@echo "make manifests-delete-> kubectl delete -f deploy/manifests (cleanup)"
+	@echo "make cluster-up     -> kind-up + ns + ghcr secret + secrets + manifests-apply"
 	@echo "make maintainerd-delete -> delete Deployment/Service maintainerd"
 	@echo "make maintainerd-restart -> rollout restart Deployment/maintainerd"
 	@echo "make maintainerd-port-forward -> forward :2525 -> svc/maintainerd:2525"
@@ -123,7 +120,6 @@ kind-up:
 	@echo "Ensuring kind cluster 'maintainerd' exists"
 	@kind get clusters | grep -qx maintainerd || kind create cluster --name maintainerd --config hack/kind-config.yaml
 	@echo "Kube context set to $(KUBECONTEXT)"
-	@$(MAKE) argocd-install
 
 .PHONY: kind-down
 kind-down:
@@ -148,36 +144,17 @@ apply-ghcr-secret:
 		$(if $(KUBECONTEXT),--context $(KUBECONTEXT)) \
 		--dry-run=client -o yaml | kubectl -n $(NAMESPACE) apply -f -
 
-# ---- Argo CD install (cluster add-on) ----
-.PHONY: argocd-install
-argocd-install:
-	@echo "Installing Argo CD into namespace argocd (idempotent)"
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) get ns argocd >/dev/null 2>&1 || kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) create ns argocd
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-	@echo "Waiting for Argo CD core deployments to be Ready"
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) -n argocd rollout status deploy/argocd-repo-server --timeout=180s || true
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) -n argocd rollout status deploy/argocd-server --timeout=180s || true
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) -n argocd rollout status deploy/argocd-application-controller --timeout=180s || true
-	@echo "Argo CD installed. To open the UI, run: make argocd-ui"
-	@echo "Initial admin password (run this):"
-	@echo "  kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo"
 
-.PHONY: argocd-ui
-argocd-ui:
-	@echo "Port-forwarding Argo CD UI to https://localhost:8088 (Ctrl-C to stop)"
-	@echo "Initial admin password (run this):"
-	@echo "  kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo"
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) -n argocd port-forward svc/argocd-server 8088:443
+# ---- Plain manifests (no Helm/Argo CD) ----
+.PHONY: manifests-apply
+manifests-apply:
+	@echo "Applying manifests in deploy/manifests to namespace $(NAMESPACE)"
+	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/manifests
 
-.PHONY: argo-bootstrap
-argo-bootstrap:
-	@echo "Applying Argo CD project and applications from deploy/argocd"
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/argocd/project.yaml
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/argocd/app-metallb.yaml
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/argocd/app-metallb-config.yaml
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/argocd/app-ingress-nginx.yaml
-	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/argocd/app-maintainerd-prod.yaml
-	@echo "Argo apps applied. Open the Argo CD UI to monitor syncs."
+.PHONY: manifests-delete
+manifests-delete:
+	@echo "Deleting manifests in deploy/manifests from namespace $(NAMESPACE)"
+	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) delete -f deploy/manifests --ignore-not-found
  
 # ---- ingress controller (nginx) for kind ----
 .PHONY: ingress-nginx-install
@@ -187,27 +164,16 @@ ingress-nginx-install:
 	@echo "Waiting for ingress controller to be Ready"
 	@kubectl $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) -n ingress-nginx wait --for=condition=Ready pod -l app.kubernetes.io/component=controller --timeout=180s
 
-# High-level: bring up full local stack for bootstrap (via Argo CD + Helm chart)
+# High-level: bring up full local stack for bootstrap (plain manifests)
 .PHONY: cluster-up
-cluster-up: kind-up ensure-ns apply-ghcr-secret secrets argo-bootstrap
-	@echo "Cluster ready. Argo CD will sync the Helm chart."
+cluster-up: kind-up ensure-ns apply-ghcr-secret secrets manifests-apply
+	@echo "Cluster ready. Manifests applied."
 
 .PHONY: cluster-down
 cluster-down: kind-down
 	@echo "Cluster 'maintainerd' deleted"
 
-## ---- Helm helpers (local render/install) ----
-.PHONY: helm-template
-helm-template:
-	@echo "Rendering Helm chart (values-prod.yaml)"
-	@helm template maintainerd deploy/helm/maintainerd -f deploy/helm/maintainerd/values-prod.yaml \
-		$(if $(NAMESPACE),--namespace $(NAMESPACE)) > /dev/null && echo "Rendered OK"
 
-.PHONY: helm-upgrade
-helm-upgrade:
-	@echo "helm upgrade --install maintainerd"
-	@helm upgrade --install maintainerd deploy/helm/maintainerd -f deploy/helm/maintainerd/values-prod.yaml \
-		--namespace $(NAMESPACE) $(if $(KUBECONTEXT),--kube-context $(KUBECONTEXT)) --create-namespace
 
 .PHONY: maintainerd-delete
 maintainerd-delete:

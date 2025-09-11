@@ -35,27 +35,23 @@ with their chosen services.
 
 ## Make Targets (deploy)
 
-We now deploy production using a Helm chart (no Kustomize). Key targets:
+We deploy using plain manifests (no Helm). Key targets:
 
 - env: Generate `bootstrap.env` from `.envrc` (KEY=VALUE lines)
 - apply-env: Create/update Secret `maintainerd-bootstrap-env` from `bootstrap.env`
 - apply-creds: Create/update Secret `workspace-credentials` from `cmd/bootstrap/credentials.json`
 - secrets: Run `env`, `apply-env`, and `apply-creds`
-- argocd-install: Install Argo CD to the cluster
-- argo-bootstrap: Apply the Argo CD Project and the single prod Application
-- helm-template: Locally render the chart with `values-prod.yaml`
-- helm-upgrade: Optional local deploy without Argo CD (helm upgrade --install)
+- manifests-apply: `kubectl apply -f deploy/manifests/` into the `maintainerd` namespace
+- manifests-delete: Cleanup resources created by the manifests
 - maintainerd-port-forward: Forward `localhost:2525 -> svc/maintainerd:2525`
 
-Chart location: `deploy/helm/maintainerd` with `values-prod.yaml` for production settings.
+## Manual Deployment
 
-## Argo CD
-
-Tips for syncing and troubleshooting the Argo CD Applications:
-
-- Hard refresh: On the app tile, open the app → click the caret next to Refresh → Hard refresh to clear repo cache.
-- Sync resources: Click Sync; in the left Resources tree, tick All (or specific items). The message “Select at least one resource” means nothing is checked yet.
-- Enable Auto‑Sync: In the app page, three‑dot menu → Enable Auto‑Sync (recommended with prune + selfHeal). Or set in the Application spec under `spec.syncPolicy.automated`.
-- Webhooks vs polling: Configure a GitHub webhook to your Argo CD server at `/api/webhook` for immediate refreshes; otherwise Argo CD refreshes on its polling interval.
-- Source: The prod `Application` points to the Helm chart path `deploy/helm/maintainerd` (value file `values-prod.yaml`).
-- Inspect errors: Check App Details → Manifest/Events/Conditions. To reproduce locally, run `make helm-template`.
+- Ensure namespace and secrets exist:
+  - `make ensure-ns`
+  - `make apply-ghcr-secret`
+  - `make secrets`
+- Apply app resources:
+  - `make manifests-apply`
+- Verify:
+  - `kubectl -n maintainerd get pvc,job,deploy,svc,ing`
