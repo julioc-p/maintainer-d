@@ -1,0 +1,21 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: maintainerd-service
+  annotations:
+    oci.oraclecloud.com/load-balancer-type: "lb"
+    service.beta.kubernetes.io/oci-load-balancer-ssl-ports: "443"
+    oci.oraclecloud.com/oci-load-balancer-listener-ssl-config: '{"CipherSuiteName":"oci-default-http2-tls-12-13-ssl-cipher-suite-v1", "Protocols":["TLSv1.3","TLSv1.2"]}'
+    service.beta.kubernetes.io/oci-load-balancer-tls-secret: maintainerd-tls
+spec:
+  selector:
+    app: maintainerd
+  type: LoadBalancer
+  loadBalancerIP: 170.9.21.206
+  ports:
+  - name: http
+    port: 80
+    targetPort: 2525
+  - name: https
+    port: 443
+    targetPort: 2525
