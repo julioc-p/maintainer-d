@@ -8,6 +8,7 @@ import (
 	"log"
 	"maintainerd/model"
 	"strings"
+	"time"
 )
 
 type SQLStore struct {
@@ -16,6 +17,23 @@ type SQLStore struct {
 
 func NewSQLStore(db *gorm.DB) *SQLStore {
 	return &SQLStore{db: db}
+}
+
+// Ping verifies the underlying database connection is healthy.
+func (s *SQLStore) Ping(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("sql store is not initialized")
+	}
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	return sqlDB.PingContext(ctx)
 }
 
 // getServiceByName returns a &Service the service identified by name

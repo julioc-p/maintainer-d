@@ -68,8 +68,10 @@ func (s *EventListener) Init(dbPath, fossaAPItokenEnvVar, ghToken, org, repo str
 
 // Run starts an HTTP server listening on the given address.
 func (s *EventListener) Run(addr string) error {
-	http.HandleFunc("/webhook", s.handleWebhook)
-	return http.ListenAndServe(addr, nil)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/webhook", s.handleWebhook)
+	return http.ListenAndServe(addr, mux)
 }
 
 func (s *EventListener) handleWebhook(w http.ResponseWriter, r *http.Request) {
@@ -237,6 +239,17 @@ func (s *EventListener) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *EventListener) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if err := s.Store.Ping(r.Context()); err != nil {
+		log.Printf("handleHealth: ERR, db ping failed: %v", err)
+		http.Error(w, "unhealthy", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 // signProjectUpForFOSSA using @store, gets the maintainers registered for @project, uses @fc to email them FOSSA invites
