@@ -28,9 +28,6 @@ func (s *SQLStore) Ping(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	return sqlDB.PingContext(ctx)
