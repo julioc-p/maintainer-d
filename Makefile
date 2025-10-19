@@ -7,6 +7,17 @@ WHOAMI=$(shell whoami)
 # Helpful context string for logs
 CTX_STR := $(if $(KUBECONTEXT),$(KUBECONTEXT),$(shell kubectl config current-context 2>/dev/null || echo current))
 
+# kcp release download settings
+KCP_VERSION ?= 0.28.3
+KCP_TAG ?= v$(KCP_VERSION)
+KCP_OS ?= $(shell uname | tr '[:upper:]' '[:lower:]')
+KCP_ARCH ?= $(shell uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
+KCP_TAR ?= kcp_$(KCP_VERSION)_$(KCP_OS)_$(KCP_ARCH).tar.gz
+KONNECTOR_TAR ?= konnector_$(KCP_VERSION)_$(KCP_OS)_$(KCP_ARCH).tar.gz
+BIN_DIR ?= $(TOPDIR)/bin
+KCP_BIN := $(BIN_DIR)/kcp
+KONNECTOR_BIN := $(BIN_DIR)/konnector
+
 # GHCR auth (optional for push). If set, we will docker login before push.
 GHCR_USER  ?= $(DOCKER_REGISTRY_USERNAME)
 GHCR_TOKEN ?= $(GITHUB_GHCR_TOKEN)
@@ -89,6 +100,7 @@ help:
 	@echo "make maintainerd-drain   -> scale Deployment/maintainerd to 0 and wait for pods to exit"
 	@echo "make maintainerd-port-forward -> forward :2525 -> svc/maintainerd:2525"
 	@echo "make cluster-down    -> delete manifests applied via deploy/manifests"
+	@echo "make kcp-install     -> download kcp $(KCP_VERSION) binaries into $(BIN_DIR)"
 
 # Convert .envrc (export FOO=bar) to KEY=VALUE lines
 # - drops comments/blank lines
@@ -197,3 +209,15 @@ maintainerd-drain:
 maintainerd-port-forward:
 	@echo "Port-forwarding localhost:2525 -> service/maintainerd:2525 [ctx=$(CTX_STR)]"
 	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) port-forward svc/maintainerd 2525:2525
+
+.PHONY: kcp-install
+kcp-install:
+	@mkdir -p $(BIN_DIR)
+	@echo "Fetching kcp $(KCP_VERSION) for $(KCP_OS)/$(KCP_ARCH)"
+	@echo "+ curl -sSL https://github.com/kcp-dev/kcp/releases/download/$(KCP_TAG)/$(KCP_TAR) | tar -xz -C $(BIN_DIR) bin/kcp"
+	@curl -sSL https://github.com/kcp-dev/kcp/releases/download/$(KCP_TAG)/$(KCP_TAR) | tar -xz -C $(BIN_DIR) bin/kcp
+	@echo "+ curl -sSL https://github.com/kcp-dev/kcp/releases/download/$(KCP_TAG)/$(KONNECTOR_TAR) | tar -xz -C $(BIN_DIR) konnector"
+	@curl -sSL https://github.com/kcp-dev/kcp/releases/download/$(KCP_TAG)/$(KONNECTOR_TAR) | tar -xz -C $(BIN_DIR) konnector || { echo "konnector archive not found for $(KCP_VERSION); skipping"; }
+	@[ ! -f $(KCP_BIN) ] || chmod +x $(KCP_BIN)
+	@[ ! -f $(KONNECTOR_BIN) ] || chmod +x $(KONNECTOR_BIN)
+	@echo "Installed kcp binaries to $(BIN_DIR)"

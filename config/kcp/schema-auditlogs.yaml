@@ -1,0 +1,28 @@
+apiVersion: apis.kcp.io/v1alpha1
+kind: APIResourceSchema
+metadata:
+  creationTimestamp: null
+  name: maintainerd.auditlogs.maintainer-d.foundation.cncf.io
+spec:
+  conversion:
+    strategy: None
+  group: maintainer-d.foundation.cncf.io
+  names:
+    kind: AuditLog
+    listKind: AuditLogList
+    plural: auditlogs
+    singular: auditlog
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      properties:
+        spec:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+      type: object
+    served: true
+    storage: true
+    subresources: {}
+
+---

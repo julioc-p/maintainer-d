@@ -1,0 +1,342 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: maintainers.maintainer-d.foundation.cncf.io
+spec:
+  group: maintainer-d.foundation.cncf.io
+  scope: Namespaced
+  names:
+    plural: maintainers
+    singular: maintainer
+    kind: Maintainer
+    listKind: MaintainerList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: collaborators.maintainer-d.foundation.cncf.io
+spec:
+  group: maintainer-d.foundation.cncf.io
+  scope: Namespaced
+  names:
+    plural: collaborators
+    singular: collaborator
+    kind: Collaborator
+    listKind: CollaboratorList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: projects.maintainer-d.foundation.cncf.io
+spec:
+  group: maintainer-d.foundation.cncf.io
+  scope: Namespaced
+  names:
+    plural: projects
+    singular: project
+    kind: Project
+    listKind: ProjectList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: companies.maintainer-d.foundation.cncf.io
+spec:
+  group: maintainer-d.foundation.cncf.io
+  scope: Namespaced
+  names:
+    plural: companies
+    singular: company
+    kind: Company
+    listKind: CompanyList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: services.maintainer-d.foundation.cncf.io
+spec:
+  group: maintainer-d.foundation.cncf.io
+  scope: Namespaced
+  names:
+    plural: services
+    singular: service
+    kind: Service
+    listKind: ServiceList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: projectmemberships.maintainer-d.foundation.cncf.io
+spec:
+  group: maintainer-d.foundation.cncf.io
+  scope: Namespaced
+  names:
+    plural: projectmemberships
+    singular: projectmembership
+    kind: ProjectMembership
+    listKind: ProjectMembershipList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: serviceteams.maintainer-d.foundation.cncf.io
+spec:
+  group: maintainer-d.foundation.cncf.io
+  scope: Namespaced
+  names:
+    plural: serviceteams
+    singular: serviceteam
+    kind: ServiceTeam
+    listKind: ServiceTeamList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: serviceusers.maintainer-d.foundation.cncf.io
+spec:
+  group: maintainer-d.foundation.cncf.io
+  scope: Namespaced
+  names:
+    plural: serviceusers
+    singular: serviceuser
+    kind: ServiceUser
+    listKind: ServiceUserList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: serviceuserteams.maintainer-d.foundation.cncf.io
+spec:
+  group: maintainer-d.foundation.cncf.io
+  scope: Namespaced
+  names:
+    plural: serviceuserteams
+    singular: serviceuserteam
+    kind: ServiceUserTeam
+    listKind: ServiceUserTeamList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: auditlogs.maintainer-d.foundation.cncf.io
+spec:
+  group: maintainer-d.foundation.cncf.io
+  scope: Namespaced
+  names:
+    plural: auditlogs
+    singular: auditlog
+    kind: AuditLog
+    listKind: AuditLogList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: reconciliationresults.maintainer-d.foundation.cncf.io
+spec:
+  group: maintainer-d.foundation.cncf.io
+  scope: Namespaced
+  names:
+    plural: reconciliationresults
+    singular: reconciliationresult
+    kind: ReconciliationResult
+    listKind: ReconciliationResultList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: onboardingtasks.maintainer-d.foundation.cncf.io
+spec:
+  group: maintainer-d.foundation.cncf.io
+  scope: Namespaced
+  names:
+    plural: onboardingtasks
+    singular: onboardingtask
+    kind: OnboardingTask
+    listKind: OnboardingTaskList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}

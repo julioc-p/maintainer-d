@@ -1,0 +1,20 @@
+apiVersion: apis.kcp.io/v1alpha1
+kind: APIExport
+metadata:
+  name: maintainer-resources
+spec:
+  maximalPermissionPolicy:
+    local: {}
+  latestResourceSchemas:
+    - maintainerd.maintainers.maintainer-d.foundation.cncf.io
+    - maintainerd.collaborators.maintainer-d.foundation.cncf.io
+    - maintainerd.projects.maintainer-d.foundation.cncf.io
+    - maintainerd.companies.maintainer-d.foundation.cncf.io
+    - maintainerd.services.maintainer-d.foundation.cncf.io
+    - maintainerd.projectmemberships.maintainer-d.foundation.cncf.io
+    - maintainerd.serviceteams.maintainer-d.foundation.cncf.io
+    - maintainerd.serviceusers.maintainer-d.foundation.cncf.io
+    - maintainerd.serviceuserteams.maintainer-d.foundation.cncf.io
+    - maintainerd.auditlogs.maintainer-d.foundation.cncf.io
+    - maintainerd.reconciliationresults.maintainer-d.foundation.cncf.io
+    - maintainerd.onboardingtasks.maintainer-d.foundation.cncf.io

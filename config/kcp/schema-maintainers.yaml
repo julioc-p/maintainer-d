@@ -1,0 +1,32 @@
+apiVersion: apis.kcp.io/v1alpha1
+kind: APIResourceSchema
+metadata:
+  creationTimestamp: null
+  name: maintainerd.maintainers.maintainer-d.foundation.cncf.io
+spec:
+  conversion:
+    strategy: None
+  group: maintainer-d.foundation.cncf.io
+  names:
+    kind: Maintainer
+    listKind: MaintainerList
+    plural: maintainers
+    singular: maintainer
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      properties:
+        spec:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+        status:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true
+      type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+
+---
