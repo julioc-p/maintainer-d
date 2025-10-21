@@ -13,10 +13,18 @@ KCP_TAG ?= v$(KCP_VERSION)
 KCP_OS ?= $(shell uname | tr '[:upper:]' '[:lower:]')
 KCP_ARCH ?= $(shell uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
 KCP_TAR ?= kcp_$(KCP_VERSION)_$(KCP_OS)_$(KCP_ARCH).tar.gz
-KONNECTOR_TAR ?= konnector_$(KCP_VERSION)_$(KCP_OS)_$(KCP_ARCH).tar.gz
+APIGEN_TAR ?= apigen_$(KCP_VERSION)_$(KCP_OS)_$(KCP_ARCH).tar.gz
+KCP_CHECKSUMS ?= kcp_$(KCP_VERSION)_checksums.txt
+KCP_RELEASE_URL ?= https://github.com/kcp-dev/kcp/releases/download/$(KCP_TAG)
 BIN_DIR ?= $(TOPDIR)/bin
 KCP_BIN := $(BIN_DIR)/kcp
-KONNECTOR_BIN := $(BIN_DIR)/konnector
+APIGEN_BIN := $(BIN_DIR)/apigen
+CONTROLLER_GEN ?= $(BIN_DIR)/controller-gen
+APIGEN ?= $(APIGEN_BIN)
+GOCACHE_DIR ?= $(TOPDIR)/.gocache
+KCP_CRD_DIR ?= $(TOPDIR)/config/crd/bases
+KCP_SCHEMA_DIR ?= $(TOPDIR)/config/kcp
+KCP_RESOURCES := auditlogs collaborators companies maintainers onboardingtasks projectmemberships projects reconciliationresults services serviceteams serviceusers serviceuserteams
 
 # GHCR auth (optional for push). If set, we will docker login before push.
 GHCR_USER  ?= $(DOCKER_REGISTRY_USERNAME)
@@ -214,10 +222,39 @@ maintainerd-port-forward:
 kcp-install:
 	@mkdir -p $(BIN_DIR)
 	@echo "Fetching kcp $(KCP_VERSION) for $(KCP_OS)/$(KCP_ARCH)"
-	@echo "+ curl -sSL https://github.com/kcp-dev/kcp/releases/download/$(KCP_TAG)/$(KCP_TAR) | tar -xz -C $(BIN_DIR) bin/kcp"
-	@curl -sSL https://github.com/kcp-dev/kcp/releases/download/$(KCP_TAG)/$(KCP_TAR) | tar -xz -C $(BIN_DIR) bin/kcp
-	@echo "+ curl -sSL https://github.com/kcp-dev/kcp/releases/download/$(KCP_TAG)/$(KONNECTOR_TAR) | tar -xz -C $(BIN_DIR) konnector"
-	@curl -sSL https://github.com/kcp-dev/kcp/releases/download/$(KCP_TAG)/$(KONNECTOR_TAR) | tar -xz -C $(BIN_DIR) konnector || { echo "konnector archive not found for $(KCP_VERSION); skipping"; }
-	@[ ! -f $(KCP_BIN) ] || chmod +x $(KCP_BIN)
-	@[ ! -f $(KONNECTOR_BIN) ] || chmod +x $(KONNECTOR_BIN)
-	@echo "Installed kcp binaries to $(BIN_DIR)"
+	@TMP_DIR=$$(mktemp -d); \
+	set -euo pipefail; \
+	echo "+ curl -sSL $(KCP_RELEASE_URL)/$(KCP_CHECKSUMS)"; \
+	curl -sSL -o $$TMP_DIR/$(KCP_CHECKSUMS) $(KCP_RELEASE_URL)/$(KCP_CHECKSUMS); \
+	for tarball in $(KCP_TAR) $(APIGEN_TAR); do \
+		echo "+ curl -sSL $(KCP_RELEASE_URL)/$$tarball -o $$TMP_DIR/$$tarball"; \
+		curl -sSL -o $$TMP_DIR/$$tarball $(KCP_RELEASE_URL)/$$tarball; \
+		grep " $$tarball$$" $$TMP_DIR/$(KCP_CHECKSUMS) > $$TMP_DIR/$$tarball.sha256; \
+		SUM=$$(cut -d' ' -f1 $$TMP_DIR/$$tarball.sha256); \
+		( cd $$TMP_DIR && sha256sum --check $$tarball.sha256 ); \
+		echo "Verified $$tarball (sha256=$$SUM)"; \
+	done; \
+	tar -xzf $$TMP_DIR/$(KCP_TAR) -C $(BIN_DIR) --strip-components=1 bin/kcp; \
+	tar -xzf $$TMP_DIR/$(APIGEN_TAR) -C $(BIN_DIR) --strip-components=1 bin/apigen; \
+	chmod +x $(KCP_BIN) $(APIGEN_BIN); \
+	rm -rf $$TMP_DIR; \
+	echo "Installed kcp and apigen into $(BIN_DIR)"
+
+.PHONY: kcp-generate
+kcp-generate:
+	@[ -x "$(CONTROLLER_GEN)" ] || { echo "Missing controller-gen binary at $(CONTROLLER_GEN). Install it or set CONTROLLER_GEN to the binary path."; exit 1; }
+	@[ -x "$(APIGEN)" ] || { echo "Missing apigen binary at $(APIGEN). Run 'make kcp-install' or download it manually."; exit 1; }
+	@mkdir -p $(GOCACHE_DIR) $(KCP_CRD_DIR) $(KCP_SCHEMA_DIR)
+	@echo "Generating CustomResourceDefinitions in $(KCP_CRD_DIR)"
+	@GOCACHE=$(GOCACHE_DIR) $(CONTROLLER_GEN) crd paths=./apis/... output:crd:dir=$(KCP_CRD_DIR)
+	@rm -f $(KCP_CRD_DIR)/_.yaml
+	@TMP_DIR=$$(mktemp -d); \
+		set -euo pipefail; \
+		echo "Rendering APIResourceSchemas with apigen"; \
+		$(APIGEN) --input-dir $(KCP_CRD_DIR) --output-dir $$TMP_DIR; \
+		for resource in $(KCP_RESOURCES); do \
+			cp $$TMP_DIR/apiresourceschema-$$resource.maintainer-d.cncf.io.yaml $(KCP_SCHEMA_DIR)/schema-$$resource.yaml; \
+		done; \
+		cp $$TMP_DIR/apiexport-maintainer-d.cncf.io.yaml $(KCP_SCHEMA_DIR)/api-export.yaml; \
+		rm -rf $$TMP_DIR; \
+		echo "Updated APIExport and APIResourceSchemas in $(KCP_SCHEMA_DIR)"

@@ -5,7 +5,8 @@ maintainerd domain model inside kcp.
 
 ## Prerequisites
 
-- kcp v0.28.3+ running locally (`make kcp-install` followed by `./bin/kcp start ...`).
+- kcp v0.28.3+ running locally (`make kcp-install` followed by `./bin/kcp start ...`). The install
+  target downloads the `kcp` CLI and the `apigen` helper and verifies release checksums.
 - kubectl krew plugins for kcp. Install them as described in the upstream guide
   <https://docs.kcp.io/kcp/latest/setup/kubectl-plugin/>:
 
@@ -56,44 +57,36 @@ kubectl ws create projects/etcd
 
 ## API Export Layout
 
-1. Apply the CRDs under `config/crd/bases/` within `root:cncf`.
-2. Publish an API export:
+1. Regenerate CRDs and APIResourceSchemas after any Go type change:
 
-```bash
-kubectl kcp api-export create maintainer-resources \
-  --resources=maintainers,collaborators,projects,companies,services,projectmemberships,serviceteams,serviceusers,serviceuserteams,auditlogs,reconciliationresults,onboardingtasks
-```
+   ```bash
+   make kcp-generate
+   ```
 
-3. Confirm the CRDs exist before binding (otherwise the API export cannot resolve the generated
-   APIResourceSchemas). Snapshotting to APIResourceSchemas is optional but recommended once the
-   shapes settle:
+   This runs `controller-gen` to refresh the CRDs in `config/crd/bases/` and then uses the kcp
+   `apigen` tool to build matching APIResourceSchemas plus an APIExport manifest under
+   `config/kcp/`. Run `make kcp-install` once to download the required `kcp` and `apigen`
+   binaries into `./bin/`.
+
+2. Apply the CRDs within the `root:cncf` workspace:
 
    ```bash
    kubectl ws use :root:cncf
-   kubectl apply -f config/crd/bases/maintainer-d.foundation.cncf.io.yaml
+   kubectl apply -f config/crd/bases/
+   ```
 
-   # snapshot each CRD into the same workspace as the API export
-   for crd in maintainers collaborators projects companies services \
-              projectmemberships serviceteams serviceusers serviceuserteams \
-              auditlogs reconciliationresults onboardingtasks; do
-     kubectl get crd ${crd}.maintainer-d.foundation.cncf.io -o yaml \
-       | kubectl kcp crd snapshot -f - --prefix maintainerd \
-       > config/kcp/schema-${crd}.yaml
-   done
+3. Publish the API export from the same workspace:
 
-   for schema in config/kcp/schema-*.yaml; do
-     kubectl ws use :root:cncf
-     kubectl apply -f "$schema"
-   done
-  ```
+   ```bash
+   kubectl ws use :root:cncf
+   kubectl apply -f config/kcp/api-export.yaml
 
-   If you snapshot, make sure the `latestResourceSchemas` entries in `config/kcp/api-export.yaml`
-   match the `metadata.name` values produced by the snapshot step (e.g.
-   `maintainerd.<resource>.maintainer-d.foundation.cncf.io`). The repo now includes the generated
-   schema files under `config/kcp/schema-*.yaml` as a reference.
+   # the schema files live alongside the export for convenience
+   kubectl apply -f config/kcp/schema-*.yaml
+   ```
 
 4. Grant access to the people workspace and project workspaces by creating API bindings that point
-   to the `maintainer-resources` export. The export owner must allow bindings first:
+   to the `maintainer-d.cncf.io` export. The export owner must allow bindings first:
 
 ```bash
 kubectl ws use cncf
@@ -105,10 +98,10 @@ kubectl apply -f config/kcp/api-export-bind-rbac.yaml
 
 ```bash
 kubectl ws use cncf/people
-kubectl kcp bind apiexport root:cncf:maintainer-resources --name maintainer-resources
+kubectl kcp bind apiexport root:cncf:maintainer-d.cncf.io --name maintainer-d-foundation
 
 # confirm the binding is ready
-kubectl get apibinding maintainer-resources -o wide
+kubectl get apibinding maintainer-d-foundation -o wide
 ```
 
 Repeat the binding step for each project workspace to make the API group available.

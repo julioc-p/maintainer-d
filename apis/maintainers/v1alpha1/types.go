@@ -3,24 +3,8 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 )
-
-// Group metadata for the maintainer API exposed through kcp.
-const (
-	GroupName = "maintainer-d.foundation.cncf.io"
-	Version   = "v1alpha1"
-)
-
-// SchemeGroupVersion identifies the API group and version for this package.
-var SchemeGroupVersion = schema.GroupVersion{Group: GroupName, Version: Version}
-
-// SchemeBuilder registers the custom resources with a scheme.
-var SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
-
-// AddToScheme appends all of this package's types to the supplied scheme.
-var AddToScheme = SchemeBuilder.AddToScheme
 
 // ResourceReference expresses a loose reference to another resource. The UID is optional
 // but helps controllers confirm identity when present.
@@ -82,6 +66,7 @@ type MaintainerStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:path=maintainers,scope=Namespaced,shortName=maint,categories=maintainerd
 // +kubebuilder:subresource:status
 
 // Maintainer represents an individual with project responsibilities.
@@ -121,6 +106,7 @@ type CollaboratorStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:path=collaborators,scope=Namespaced,shortName=collab,categories=maintainerd
 // +kubebuilder:subresource:status
 
 // Collaborator represents a contributor with limited responsibilities.
@@ -166,6 +152,7 @@ type ProjectStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:path=projects,scope=Namespaced,shortName=proj,categories=maintainerd
 // +kubebuilder:subresource:status
 
 // Project represents a CNCF project or subproject.
@@ -202,6 +189,7 @@ type CompanyStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:path=companies,scope=Namespaced,shortName=comp,categories=maintainerd
 // +kubebuilder:subresource:status
 
 // Company represents a legal entity affiliation for maintainers.
@@ -237,6 +225,7 @@ type ServiceStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:path=services,scope=Namespaced,shortName=svc,categories=maintainerd
 // +kubebuilder:subresource:status
 
 // Service captures a service integration such as FOSSA, GitHub, or Netlify.
@@ -273,6 +262,7 @@ type ProjectMembershipStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:path=projectmemberships,scope=Namespaced,shortName=prjmem,categories=maintainerd
 // +kubebuilder:subresource:status
 
 // ProjectMembership establishes membership between a maintainer and a project.
@@ -309,6 +299,7 @@ type ServiceTeamStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:path=serviceteams,scope=Namespaced,shortName=svcteam,categories=maintainerd
 // +kubebuilder:subresource:status
 
 // ServiceTeam represents a remote service team associated with a project.
@@ -347,6 +338,7 @@ type ServiceUserStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:path=serviceusers,scope=Namespaced,shortName=svcusr,categories=maintainerd
 // +kubebuilder:subresource:status
 
 // ServiceUser models an account on an external service used by maintainers.
@@ -382,6 +374,7 @@ type ServiceUserTeamStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:path=serviceuserteams,scope=Namespaced,shortName=svcutm,categories=maintainerd
 // +kubebuilder:subresource:status
 
 // ServiceUserTeam associates a service user with a service team membership.
@@ -394,6 +387,7 @@ type ServiceUserTeam struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:path=auditlogs,scope=Namespaced,shortName=alog,categories=maintainerd
 
 // ServiceUserTeamList is a list of ServiceUserTeam resources.
 type ServiceUserTeamList struct {
@@ -447,6 +441,7 @@ type ReconciliationResultStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:path=reconciliationresults,scope=Namespaced,shortName=reconres,categories=maintainerd
 // +kubebuilder:subresource:status
 
 // ReconciliationResult stores reconciliation findings for audit and follow-up.
@@ -485,6 +480,7 @@ type OnboardingTaskStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:path=onboardingtasks,scope=Namespaced,shortName=onbtask,categories=maintainerd
 // +kubebuilder:subresource:status
 
 // OnboardingTask tracks onboarding progress for CNCF projects.
