@@ -24,7 +24,7 @@ APIGEN ?= $(APIGEN_BIN)
 GOCACHE_DIR ?= $(TOPDIR)/.gocache
 KCP_CRD_DIR ?= $(TOPDIR)/config/crd/bases
 KCP_SCHEMA_DIR ?= $(TOPDIR)/config/kcp
-KCP_RESOURCES := auditlogs collaborators companies maintainers onboardingtasks projectmemberships projects reconciliationresults services serviceteams serviceusers serviceuserteams
+KCP_RESOURCES := collaborators companies maintainers onboardingtasks projectmemberships projects services serviceteams serviceusers serviceuserteams
 
 # GHCR auth (optional for push). If set, we will docker login before push.
 GHCR_USER  ?= $(DOCKER_REGISTRY_USERNAME)

@@ -386,80 +386,11 @@ type ServiceUserTeam struct {
 	Status ServiceUserTeamStatus `json:"status,omitempty"`
 }
 
-// +kubebuilder:object:root=true
-// +kubebuilder:resource:path=auditlogs,scope=Namespaced,shortName=alog,categories=maintainerd
-
 // ServiceUserTeamList is a list of ServiceUserTeam resources.
 type ServiceUserTeamList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ServiceUserTeam `json:"items"`
-}
-
-// AuditLogSpec captures a historical action performed against maintainer data.
-type AuditLogSpec struct {
-	Action        string             `json:"action"`
-	Message       string             `json:"message,omitempty"`
-	Metadata      string             `json:"metadata,omitempty"`
-	ProjectRef    *ResourceReference `json:"projectRef,omitempty"`
-	MaintainerRef *ResourceReference `json:"maintainerRef,omitempty"`
-	ServiceRef    *ResourceReference `json:"serviceRef,omitempty"`
-	OccurredAt    metav1.Time        `json:"occurredAt"`
-}
-
-// +kubebuilder:object:root=true
-
-// AuditLog is an append-only record for significant maintainer operations.
-type AuditLog struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	Spec AuditLogSpec `json:"spec"`
-}
-
-// +kubebuilder:object:root=true
-
-// AuditLogList is a list of AuditLog entries.
-type AuditLogList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []AuditLog `json:"items"`
-}
-
-// ReconciliationResultSpec records the outcome of an automated reconciliation.
-type ReconciliationResultSpec struct {
-	ServiceRef            ResourceReference   `json:"serviceRef"`
-	ProjectRef            *ResourceReference  `json:"projectRef,omitempty"`
-	MissingMaintainerRefs []ResourceReference `json:"missingMaintainerRefs,omitempty"`
-	ObservedAt            metav1.Time         `json:"observedAt"`
-	Message               string              `json:"message,omitempty"`
-}
-
-// ReconciliationResultStatus expresses system level conditions for the result.
-type ReconciliationResultStatus struct {
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
-}
-
-// +kubebuilder:object:root=true
-// +kubebuilder:resource:path=reconciliationresults,scope=Namespaced,shortName=reconres,categories=maintainerd
-// +kubebuilder:subresource:status
-
-// ReconciliationResult stores reconciliation findings for audit and follow-up.
-type ReconciliationResult struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	Spec   ReconciliationResultSpec   `json:"spec,omitempty"`
-	Status ReconciliationResultStatus `json:"status,omitempty"`
-}
-
-// +kubebuilder:object:root=true
-
-// ReconciliationResultList is a list of ReconciliationResult resources.
-type ReconciliationResultList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ReconciliationResult `json:"items"`
 }
 
 // OnboardingTaskSpec describes a project onboarding task pulled from an external tracker.
@@ -513,8 +444,6 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ServiceTeam{}, &ServiceTeamList{},
 		&ServiceUser{}, &ServiceUserList{},
 		&ServiceUserTeam{}, &ServiceUserTeamList{},
-		&AuditLog{}, &AuditLogList{},
-		&ReconciliationResult{}, &ReconciliationResultList{},
 		&OnboardingTask{}, &OnboardingTaskList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
