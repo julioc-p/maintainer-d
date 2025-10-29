@@ -47,11 +47,15 @@ func (s *EventListener) Init(dbPath, fossaAPItokenEnvVar, ghToken, org, repo str
 	}
 	s.Projects = projectMap
 	log.Printf("Init: DBG, project map has %d entries", len(s.Projects))
-	log.Printf("Init: DBG, they are...")
+	log.Printf("Init: DBG, listening for events on %s", s.Repo.Name)
+	var landscape string
+
 	for _, project := range s.Projects {
-		log.Printf("info: project: %s, projectID: %d, maintainer count: %d", project.Name, project.ID,
-			len(project.Maintainers))
+		pmc := fmt.Sprintf("%s %d, ", project.Name, len(project.Maintainers))
+		landscape += pmc
 	}
+	log.Printf("Init: INF\n%s", landscape)
+
 	token := os.Getenv(fossaAPItokenEnvVar)
 	if token == "" {
 		log.Printf("Init: ERR, the environment variable %s must be set", fossaAPItokenEnvVar)

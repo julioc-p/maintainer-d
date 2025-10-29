@@ -3,12 +3,13 @@ package db
 import (
 	"context"
 	"fmt"
-	"go.uber.org/zap"
-	"gorm.io/gorm"
 	"log"
 	"maintainerd/model"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 type SQLStore struct {
@@ -196,7 +197,10 @@ func (s *SQLStore) GetProjectServiceTeamMap(serviceName string) (map[uint]*model
 }
 func (s *SQLStore) GetProjectMapByName() (map[string]model.Project, error) {
 	var projects []model.Project
-	if err := s.db.Find(&projects).Error; err != nil {
+	if err := s.db.
+		Preload("Maintainers").
+		Preload("Maintainers.Company").
+		Find(&projects).Error; err != nil {
 		return nil, err
 	}
 
