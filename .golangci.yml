@@ -1,0 +1,80 @@
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - errcheck      # Check for unchecked errors
+    - gosimple      # Simplify code
+    - govet         # Vet examines Go source code
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Go static analysis
+    - unused        # Check for unused code
+    - gofmt         # Check formatting
+    - goimports     # Check imports formatting
+    - misspell      # Find misspelled words
+    - unconvert     # Remove unnecessary conversions
+    - unparam       # Find unused function parameters
+    - revive        # Fast, configurable linter
+    - gosec         # Security checks
+    - bodyclose     # Check HTTP response body closed
+    - sqlclose      # Check SQL rows/statements closed
+    - nilerr        # Find code returning nil even if error
+
+linters-settings:
+  errcheck:
+    check-blank: true
+    check-type-assertions: true
+  
+  govet:
+    enable-all: true
+    disable:
+      - shadow  # Can be too noisy
+  
+  revive:
+    rules:
+      - name: exported
+        disabled: true  # Allow unexported comments
+      - name: package-comments
+        disabled: true  # Allow missing package comments
+  
+  gosec:
+    excludes:
+      - G404  # Insecure random - OK for non-crypto uses
+  
+  misspell:
+    locale: US
+
+issues:
+  exclude-rules:
+    # Exclude some linters from test files
+    - path: _test\.go
+      linters:
+        - gosec
+        - unparam
+        - errcheck
+    
+    # Exclude mock files
+    - path: .*_mock\.go
+      linters:
+        - revive
+        - unused
+    
+    # Exclude test helper files
+    - path: test_helpers\.go
+      linters:
+        - unused
+    
+    # Allow long lines in test tables
+    - path: _test\.go
+      linters:
+        - lll
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
