@@ -1,0 +1,114 @@
+.navSearch {
+  width: 100%;
+}
+
+.navSearch :global(input) {
+  color: #0b1220;
+}
+
+.navSearch :global(input::placeholder) {
+  color: rgba(11, 18, 32, 0.6);
+}
+
+.navSearch :global(.form-control),
+.navSearch :global(.form-input),
+.navSearch :global(.form-control-sm) {
+  color: #0b1220;
+}
+
+.main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 36px 24px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.controlsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.resultsCount {
+  font-size: 14px;
+  color: rgba(15, 23, 42, 0.75);
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.showSelect {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.showSelect select {
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+
+.statusBanner {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.08);
+  font-size: 13px;
+}
+
+.searchbarWrapper {
+  width: 100%;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.sidebar {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.06);
+}
+
+.filtersHeader {
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.cardsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.pagination {
+  display: flex;
+  justify-content: center;
+}
+
+@media (max-width: 600px) {
+  .main {
+    padding: 24px 16px 48px;
+  }
+
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}

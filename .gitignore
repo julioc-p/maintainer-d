@@ -12,3 +12,8 @@ demo.db
 .modcache/
 coverage.out
 .kcp/
+.npm-cache/
+.config/
+testdata/*.db
+testdata/*.log
+web/.next/

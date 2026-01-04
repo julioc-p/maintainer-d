@@ -219,6 +219,111 @@ help:
 	@echo "make maintainerd-port-forward -> forward :2525 -> svc/maintainerd:2525"
 	@echo "make cluster-down    -> delete manifests applied via deploy/manifests"
 	@echo "make kcp-install     -> download kcp $(KCP_VERSION) binaries into $(BIN_DIR)"
+	@echo ""
+	@echo "== Web =="
+	@echo "make web-install     -> install web dependencies"
+	@echo "make web-dev         -> run Next.js dev server"
+	@echo "make web-bff-run     -> run the Go BFF locally"
+	@echo "make test-web        -> run web BDD tests (Cucumber + Playwright)"
+	@echo "make test-web-podman -> run web BDD tests in a Playwright container via Podman"
+	@echo "make test-web-report -> generate HTML report from Cucumber JSON output"
+
+# ---- Web ----
+.PHONY: web-install
+web-install:
+	@cd web && npm install
+
+.PHONY: web-dev
+web-dev:
+	@cd web && npm run dev
+
+.PHONY: web-bff-run
+web-bff-run:
+	@go run ./cmd/web-bff
+
+.PHONY: test-web
+test-web:
+	@bash -c 'set -euo pipefail; \
+	TESTDATA_DIR="$${TESTDATA_DIR:-/work/testdata}"; \
+	HOST_LOG_DIR="$${HOST_LOG_DIR:-/work/testdata}"; \
+	mkdir -p "$$TESTDATA_DIR"; \
+	bff_pid=""; web_pid=""; \
+	cleanup() { \
+		status=$$?; \
+		if [ -n "$$web_pid" ] || [ -n "$$bff_pid" ]; then \
+			kill $$web_pid $$bff_pid >/dev/null 2>&1 || true; \
+		fi; \
+		if [ "$$TESTDATA_DIR" != "$$HOST_LOG_DIR" ]; then \
+			mkdir -p "$$HOST_LOG_DIR"; \
+			cp -f "$$TESTDATA_DIR"/web-*-test.log "$$HOST_LOG_DIR" 2>/dev/null || true; \
+			cp -f "$$TESTDATA_DIR"/maintainerd_test.db "$$HOST_LOG_DIR" 2>/dev/null || true; \
+			cp -f "$$TESTDATA_DIR"/web-bdd-report.json "$$HOST_LOG_DIR" 2>/dev/null || true; \
+			cp -f "$$TESTDATA_DIR"/web-bdd-results.xml "$$HOST_LOG_DIR" 2>/dev/null || true; \
+		fi; \
+		if [ $$status -ne 0 ]; then \
+			echo "test-web failed; dumping logs from $$TESTDATA_DIR"; \
+			[ -f "$$TESTDATA_DIR/web-bff-test.log" ] && echo "--- web-bff-test.log ---" && cat "$$TESTDATA_DIR/web-bff-test.log" || true; \
+			[ -f "$$TESTDATA_DIR/web-app-test.log" ] && echo "--- web-app-test.log ---" && cat "$$TESTDATA_DIR/web-app-test.log" || true; \
+			[ -f "$$TESTDATA_DIR/web-build-test.log" ] && echo "--- web-build-test.log ---" && cat "$$TESTDATA_DIR/web-build-test.log" || true; \
+		fi; \
+		exit $$status; \
+	}; \
+	trap cleanup EXIT; \
+	rm -f "$$TESTDATA_DIR/maintainerd_test.db" || true; \
+	if [ -f "$$TESTDATA_DIR/maintainerd_test.db" ]; then \
+		echo "Failed to remove $$TESTDATA_DIR/maintainerd_test.db (check ownership/permissions)."; \
+		exit 1; \
+	fi; \
+	go run ./cmd/web-bff-seed -db "$$TESTDATA_DIR/maintainerd_test.db"; \
+	BFF_ADDR=:8001 BFF_TEST_MODE=true SESSION_COOKIE_SECURE=false MD_DB_PATH="$$TESTDATA_DIR/maintainerd_test.db" \
+	WEB_APP_BASE_URL=http://localhost:3001 GITHUB_OAUTH_CLIENT_ID=test GITHUB_OAUTH_CLIENT_SECRET=test \
+	go run ./cmd/web-bff > >(tee "$$TESTDATA_DIR/web-bff-test.log") 2>&1 & \
+	bff_pid=$$!; \
+	mkdir -p "$$TESTDATA_DIR/tmp" web/tmp || true; \
+	NEXT_PUBLIC_BFF_BASE_URL=http://localhost:8001 NEXT_DIST_DIR="$$TESTDATA_DIR/next-dist" TMPDIR="$$TESTDATA_DIR/tmp" NEXT_TEMP_DIR="$$TESTDATA_DIR/tmp" \
+	NEXT_TELEMETRY_DISABLED=1 NPM_CONFIG_UPDATE_NOTIFIER=false TURBOPACK_ROOT=/work/web OUTPUT_FILE_TRACING_ROOT=/work/web \
+	npm --prefix web run build > "$$TESTDATA_DIR/web-build-test.log" 2>&1; \
+	PORT=3001 NEXT_PUBLIC_BFF_BASE_URL=http://localhost:8001 NEXT_DIST_DIR="$$TESTDATA_DIR/next-dist" TMPDIR="$$TESTDATA_DIR/tmp" NEXT_TEMP_DIR="$$TESTDATA_DIR/tmp" \
+	NEXT_TELEMETRY_DISABLED=1 NPM_CONFIG_UPDATE_NOTIFIER=false TURBOPACK_ROOT=/work/web OUTPUT_FILE_TRACING_ROOT=/work/web \
+	npm --prefix web run start > "$$TESTDATA_DIR/web-app-test.log" 2>&1 & \
+	web_pid=$$!; \
+	npx --prefix web wait-on http://localhost:8001/healthz http://localhost:3001 > /dev/null 2>&1; \
+	WEB_BASE_URL=http://localhost:3001 BFF_BASE_URL=http://localhost:8001 TEST_STAFF_LOGIN=staff-tester \
+	NEXT_TELEMETRY_DISABLED=1 NPM_CONFIG_UPDATE_NOTIFIER=false WEB_TEST_ARTIFACTS_DIR="$$TESTDATA_DIR/web-artifacts" npm --prefix web run test:bdd; \
+	'
+
+.PHONY: test-web-report
+test-web-report:
+	@bash -c 'set -euo pipefail; \
+	$(MAKE) test-web-podman || true; \
+	BASE_DIR="$${HOST_LOG_DIR:-testdata}"; \
+	BASE_DIR_ABS="$$(cd "$$BASE_DIR" && pwd)"; \
+	JSON_PATH="$$BASE_DIR_ABS/web-bdd-report.json"; \
+	HTML_PATH="$$BASE_DIR_ABS/web-bdd-report.html"; \
+	if [ -f "$$JSON_PATH" ]; then \
+		(cd web && node -e "require(\"cucumber-html-reporter\").generate({ jsonFile: \"$$JSON_PATH\", output: \"$$HTML_PATH\", theme: \"bootstrap\", reportSuiteAsScenarios: true, launchReport: false, metadata: { App: \"maintainer-d\", Platform: \"Web\" } });"); \
+		if command -v xdg-open >/dev/null 2>&1; then xdg-open "$$HTML_PATH" >/dev/null 2>&1 || true; fi; \
+	else \
+		echo "Missing $$JSON_PATH; run test-web first."; \
+		exit 1; \
+	fi; \
+	'
+
+.PHONY: test-web-podman
+test-web-podman:
+	@echo "Running Playwright tests in a container so non-Ubuntu hosts can execute them."
+	@if ! podman image exists maintainerd-web-test:local; then \
+		echo "Building maintainerd-web-test:local (cached for future runs)."; \
+		podman build -f testdata/web-test.Dockerfile -t maintainerd-web-test:local testdata; \
+	fi; \
+	podman run --rm -t --userns=keep-id \
+		-v $(TOPDIR):/work:Z \
+		-w /work \
+		-e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+		-e GOMODCACHE=/work/.modcache \
+		-e GOCACHE=/work/.gocache \
+		maintainerd-web-test:local \
+		bash -lc 'PATH=/usr/local/go/bin:$$PATH TESTDATA_DIR=/work/testdata HOST_LOG_DIR=/work/testdata make test-web'
 
 # Convert .envrc (export FOO=bar) to KEY=VALUE lines
 # - drops comments/blank lines
