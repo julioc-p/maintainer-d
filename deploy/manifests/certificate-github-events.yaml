@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: maintainerd-tls
+  namespace: maintainerd
+spec:
+  secretName: maintainerd-tls
+  issuerRef:
+    name: letsencrypt-http
+    kind: ClusterIssuer
+  dnsNames:
+    - github-events.cncf.io
+    - maintainer-d.cncf.io

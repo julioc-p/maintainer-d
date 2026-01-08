@@ -1,0 +1,15 @@
+FROM golang:1.24 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
+COPY . .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -o /web-bff ./cmd/web-bff
+
+FROM gcr.io/distroless/base-debian12
+COPY --from=build /web-bff /usr/local/bin/web-bff
+EXPOSE 8000
+ENTRYPOINT ["/usr/local/bin/web-bff"]

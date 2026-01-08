@@ -31,7 +31,7 @@ export default function Home() {
   const [activeMaturity, setActiveMaturity] = useState<string[]>([]);
 
   const bffBaseUrl = useMemo(() => {
-    const raw = process.env.NEXT_PUBLIC_BFF_BASE_URL || "http://localhost:8000";
+    const raw = process.env.NEXT_PUBLIC_BFF_BASE_URL || "/api";
     return raw.replace(/\/+$/, "");
   }, []);
 

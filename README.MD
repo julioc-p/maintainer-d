@@ -39,10 +39,14 @@ with their chosen services.
 
 We deploy using plain manifests (no Helm). Key targets:
 
+- `CONTAINER_TOOL=podman` (default) or `CONTAINER_TOOL=docker` to choose the container runtime for image build/push targets.
 - env: Generate `bootstrap.env` from `.envrc` (KEY=VALUE lines)
 - apply-env: Create/update Secret `maintainerd-bootstrap-env` from `bootstrap.env`
 - apply-creds: Create/update Secret `workspace-credentials` from `cmd/bootstrap/credentials.json`
 - secrets: Run `env`, `apply-env`, and `apply-creds`
+- apply-web-env: Create/update Secret `maintainerd-web-env` from `deploy/templates/maintainerd-web-env.yaml.tmpl`
+- apply-web-bff-env: Create/update Secret `maintainerd-web-bff-env` from `deploy/templates/maintainerd-web-bff-env.yaml.tmpl`
+- web-secrets: Apply both web secrets from the templates
 - manifests-apply: `kubectl apply -f deploy/manifests/` into the `maintainerd` namespace
 - manifests-delete: Cleanup resources created by the manifests
 - maintainerd-port-forward: Forward `localhost:2525 -> svc/maintainerd:2525`
@@ -98,6 +102,71 @@ Use environment variables `ORG` and `REPO` to point the server at a different Gi
 
   - Public comments never include email addresses; only GitHub handles are shown.
   - If the team does not exist, the server comments instructions to add the `fossa` label first and retry.
+
+## Developer: Run the Web App Locally
+
+Prereqs:
+- Node.js 20+
+- Go 1.24+
+
+1) Seed a local DB for the web-bff:
+```
+go run ./cmd/web-bff-seed -db ./testdata/maintainerd_test.db
+```
+
+2) Start the web-bff (API server):
+```
+MD_DB_PATH=./testdata/maintainerd_test.db \
+WEB_APP_BASE_URL=http://localhost:3000 \
+GITHUB_OAUTH_REDIRECT_URL=http://localhost:8000/auth/callback \
+GITHUB_OAUTH_CLIENT_ID=dev-client \
+GITHUB_OAUTH_CLIENT_SECRET=dev-secret \
+BFF_TEST_MODE=true \
+go run ./cmd/web-bff
+```
+
+3) Start the web app:
+```
+cd web
+NEXT_PUBLIC_BFF_BASE_URL=http://localhost:8000 \
+npm install
+npm run dev
+```
+
+Notes:
+- `BFF_TEST_MODE=true` enables `/auth/test-login?login=<github>` for local sign-in.
+- `NEXT_PUBLIC_BFF_BASE_URL` should match the web-bff address.
+
+## Secrets with SOPS (production)
+
+We use SOPS + age for encrypted Kubernetes Secrets stored in `deploy/secrets/`.
+
+1) Generate or retrieve the age key:
+```
+age-keygen -o ~/.config/sops/age/keys.txt
+age-keygen -y ~/.config/sops/age/keys.txt
+```
+The public key goes in `.sops.yaml`.
+
+2) Create plaintext secrets (once) then encrypt:
+```
+mkdir -p deploy/secrets
+cp deploy/templates/maintainerd-web-env.yaml.tmpl deploy/secrets/maintainerd-web-env.yaml
+cp deploy/templates/maintainerd-web-bff-env.yaml.tmpl deploy/secrets/maintainerd-web-bff-env.yaml
+# fill in values, then:
+sops -e -i deploy/secrets/maintainerd-web-env.yaml
+sops -e -i deploy/secrets/maintainerd-web-bff-env.yaml
+```
+
+3) Encrypt secrets (first time):
+```
+make sops-encrypt-web-secrets SOPS_AGE_KEY=age1...
+```
+
+4) Apply encrypted secrets using SOPS (set `SOPS_AGE_KEY_FILE` if you are not using the default key location):
+```
+make sops-apply-web-secrets SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt
+```
 
 
 ## License

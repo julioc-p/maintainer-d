@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "clo-ui/styles/default.scss";
 import "./globals.css";
@@ -16,6 +16,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "maintainer-d",
   description: "Maintainer-d web console",
+};
+
+export const viewport: Viewport = {
   themeColor: "#2a0552",
 };
 

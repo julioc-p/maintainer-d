@@ -9,7 +9,12 @@ IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd:$(TAG)
 IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd:latest
 SYNC_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-sync:$(TAG)
 SYNC_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-sync:latest
+WEB_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web:$(TAG)
+WEB_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web:latest
+WEB_BFF_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web-bff:$(TAG)
+WEB_BFF_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web-bff:latest
 WHOAMI=$(shell whoami)
+CONTAINER_TOOL ?= podman
 
 # Helpful context string for logs
 CTX_STR := $(if $(KUBECONTEXT),$(KUBECONTEXT),$(shell kubectl config current-context 2>/dev/null || echo current))
@@ -44,27 +49,41 @@ GHCR_TOKEN ?= $(GITHUB_GHCR_TOKEN)
 .PHONY: mntrd-image-build
 mntrd-image-build:
 	@echo "Building container image: $(IMAGE)"
-	@docker buildx build -t $(IMAGE) -f Dockerfile --target maintainerd .
+	@$(CONTAINER_TOOL) build -t $(IMAGE) -f Dockerfile --target maintainerd .
 
 .PHONY: sync-image-build
 sync-image-build:
 	@echo "Building sync image: $(SYNC_IMAGE)"
-	@docker buildx build -t $(SYNC_IMAGE) -f Dockerfile --target sync .
+	@$(CONTAINER_TOOL) build -t $(SYNC_IMAGE) -f Dockerfile --target sync .
+
+.PHONY: web-image-build
+web-image-build:
+	@echo "Building web image: $(WEB_IMAGE)"
+	@if [ -z "$(NEXT_PUBLIC_BFF_BASE_URL)" ]; then \
+		echo "NEXT_PUBLIC_BFF_BASE_URL not set; default /api will be used by the web build."; \
+	fi
+	@$(CONTAINER_TOOL) build -t $(WEB_IMAGE) -f Dockerfile.web \
+		$(if $(NEXT_PUBLIC_BFF_BASE_URL),--build-arg NEXT_PUBLIC_BFF_BASE_URL=$(NEXT_PUBLIC_BFF_BASE_URL),) .
+
+.PHONY: web-bff-image-build
+web-bff-image-build:
+	@echo "Building web-bff image: $(WEB_BFF_IMAGE)"
+	@$(CONTAINER_TOOL) build -t $(WEB_BFF_IMAGE) -f Dockerfile.web-bff .
 
 .PHONY: mntrd-image-push
 mntrd-image-push: mntrd-image-build
-	@echo "Ensuring docker is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
 	@if [ -n "$(GHCR_TOKEN)" ]; then \
 		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
-		echo "$(GHCR_TOKEN)" | docker login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
 	else \
-		echo "GHCR_TOKEN not set; attempting push with existing docker auth"; \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
 	fi
 	@echo "Pushing image: $(IMAGE)"
-	@docker push $(IMAGE)
+	@$(CONTAINER_TOOL) push $(IMAGE)
 	@echo "Tagging and pushing latest: $(IMAGE_LATEST)"
-	@docker tag $(IMAGE) $(IMAGE_LATEST)
-	@docker push $(IMAGE_LATEST)
+	@$(CONTAINER_TOOL) tag $(IMAGE) $(IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(IMAGE_LATEST)
 
 .PHONY: mntrd-image-deploy
 mntrd-image-deploy: mntrd-image-push
@@ -83,18 +102,48 @@ mntrd-image-deploy: mntrd-image-push
 
 .PHONY: sync-image-push
 sync-image-push: sync-image-build
-	@echo "Ensuring docker is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
 	@if [ -n "$(GHCR_TOKEN)" ]; then \
 		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
-		echo "$(GHCR_TOKEN)" | docker login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
 	else \
-		echo "GHCR_TOKEN not set; attempting push with existing docker auth"; \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
 	fi
 	@echo "Pushing image: $(SYNC_IMAGE)"
-	@docker push $(SYNC_IMAGE)
+	@$(CONTAINER_TOOL) push $(SYNC_IMAGE)
 	@echo "Tagging and pushing latest: $(SYNC_IMAGE_LATEST)"
-	@docker tag $(SYNC_IMAGE) $(SYNC_IMAGE_LATEST)
-	@docker push $(SYNC_IMAGE_LATEST)
+	@$(CONTAINER_TOOL) tag $(SYNC_IMAGE) $(SYNC_IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(SYNC_IMAGE_LATEST)
+
+.PHONY: web-image-push
+web-image-push: web-image-build
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@if [ -n "$(GHCR_TOKEN)" ]; then \
+		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+	else \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
+	fi
+	@echo "Pushing image: $(WEB_IMAGE)"
+	@$(CONTAINER_TOOL) push $(WEB_IMAGE)
+	@echo "Tagging and pushing latest: $(WEB_IMAGE_LATEST)"
+	@$(CONTAINER_TOOL) tag $(WEB_IMAGE) $(WEB_IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(WEB_IMAGE_LATEST)
+
+.PHONY: web-bff-image-push
+web-bff-image-push: web-bff-image-build
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@if [ -n "$(GHCR_TOKEN)" ]; then \
+		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+	else \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
+	fi
+	@echo "Pushing image: $(WEB_BFF_IMAGE)"
+	@$(CONTAINER_TOOL) push $(WEB_BFF_IMAGE)
+	@echo "Tagging and pushing latest: $(WEB_BFF_IMAGE_LATEST)"
+	@$(CONTAINER_TOOL) tag $(WEB_BFF_IMAGE) $(WEB_BFF_IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(WEB_BFF_IMAGE_LATEST)
 
 .PHONY: sync-image-deploy
 sync-image-deploy: sync-image-push
@@ -159,7 +208,7 @@ mntrd-image: mntrd-image-build
 
 .PHONY: mntrd-image-run
 mntrd-image-run: mntrd-image
-	@docker run -ti --rm $(IMAGE)
+	@$(CONTAINER_TOOL) run -ti --rm $(IMAGE)
 
 # ---- Config ----
 NAMESPACE ?= maintainerd
@@ -171,6 +220,14 @@ KUBECONTEXT ?=
 # Secret names (keep these stable across clusters)
 ENV_SECRET_NAME   ?= maintainerd-bootstrap-env
 CREDS_SECRET_NAME ?= workspace-credentials
+WEB_ENV_SECRET_NAME ?= maintainerd-web-env
+WEB_BFF_ENV_SECRET_NAME ?= maintainerd-web-bff-env
+WEB_ENV_TEMPLATE ?= deploy/templates/maintainerd-web-env.yaml.tmpl
+WEB_BFF_ENV_TEMPLATE ?= deploy/templates/maintainerd-web-bff-env.yaml.tmpl
+SOPS_CMD ?= sops
+SOPS_AGE_KEY ?=
+SOPS_AGE_KEY_FILE ?=
+SOPS_EXPECTED_AGE ?= $(shell age-keygen -y $(HOME)/.config/sops/age/keys.txt 2>/dev/null || true)
 
 # Path to the JSON creds file on your machine
 CREDS_FILE ?= ./cmd/bootstrap/credentials.json
@@ -199,6 +256,14 @@ help:
 	@echo "make env             -> build $(ENVOUT) from $(ENVSRC)"
 	@echo "make apply-env       -> create/update $(ENV_SECRET_NAME) from $(ENVOUT)"
 	@echo "make apply-creds     -> create/update $(CREDS_SECRET_NAME) from $(CREDS_FILE)"
+	@echo "make apply-web-env   -> create/update $(WEB_ENV_SECRET_NAME) from $(WEB_ENV_TEMPLATE)"
+	@echo "make apply-web-bff-env -> create/update $(WEB_BFF_ENV_SECRET_NAME) from $(WEB_BFF_ENV_TEMPLATE)"
+	@echo "make web-secrets     -> apply both web secrets from templates"
+	@echo "make sops-encrypt-web-secrets -> encrypt web secrets in deploy/secrets (uses SOPS_AGE_KEY)"
+	@echo "make sops-envsubst-encrypt -> envsubst templates into deploy/secrets then sops-encrypt (uses SOPS_AGE_KEY)"
+	@echo "make sops-edit-web-secrets -> edit encrypted web secrets with sops"
+	@echo "make sops-apply-web-secrets -> apply web secrets from SOPS (uses local sops; set SOPS_CMD or SOPS_AGE_KEY_FILE if needed)"
+	@echo "make deploy-web -> apply web-bff/web services + deployments + ingress + cert"
 	@echo "make clean-env       -> remove $(ENVOUT)"
 	@echo "make print           -> show which keys would be loaded (without values)"
 	@echo "make mntrd-image-build  -> build maintainerd image $(IMAGE) locally"
@@ -353,6 +418,109 @@ apply-creds:
 		--from-file=$(CREDS_KEY)=$(CREDS_FILE) \
 		$(if $(KUBECONTEXT),--context $(KUBECONTEXT)) \
 		--dry-run=client -o yaml | kubectl -n $(NAMESPACE) apply -f -
+
+# Apply the web env Secret from the template (env vars are substituted)
+.PHONY: apply-web-env
+apply-web-env:
+	@echo "Applying secret $(WEB_ENV_SECRET_NAME) in namespace $(NAMESPACE) [ctx=$(CTX_STR)]"
+	@envsubst < $(WEB_ENV_TEMPLATE) | kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f -
+
+# Apply the web-bff env Secret from the template (env vars are substituted)
+.PHONY: apply-web-bff-env
+apply-web-bff-env:
+	@echo "Applying secret $(WEB_BFF_ENV_SECRET_NAME) in namespace $(NAMESPACE) [ctx=$(CTX_STR)]"
+	@envsubst < $(WEB_BFF_ENV_TEMPLATE) | kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f -
+
+# Convenience combo target
+.PHONY: web-secrets
+web-secrets: apply-web-env apply-web-bff-env
+	@echo "Web secrets applied: $(WEB_ENV_SECRET_NAME), $(WEB_BFF_ENV_SECRET_NAME) [ns=$(NAMESPACE)]"
+
+.PHONY: sops-apply-web-secrets
+sops-apply-web-secrets:
+	@echo "Applying web secrets from SOPS [ns=$(NAMESPACE)]"
+	@bash -c 'set -euo pipefail; \
+	if [ ! -f "deploy/secrets/maintainerd-web-env.yaml" ] || [ ! -f "deploy/secrets/maintainerd-web-bff-env.yaml" ]; then \
+		echo "Missing encrypted secrets. Expected deploy/secrets/maintainerd-web-env.yaml and deploy/secrets/maintainerd-web-bff-env.yaml."; \
+		echo "Create and encrypt them with sops before running this target."; exit 1; \
+	fi; \
+	if [ -n "$(SOPS_EXPECTED_AGE)" ]; then \
+		for file in deploy/secrets/maintainerd-web-env.yaml deploy/secrets/maintainerd-web-bff-env.yaml; do \
+			if ! rg -q "recipient: $(SOPS_EXPECTED_AGE)" "$$file"; then \
+				echo "Encrypted recipients for $$file do not include expected key $(SOPS_EXPECTED_AGE)."; \
+				echo "Re-encrypt with: make sops-encrypt-web-secrets SOPS_AGE_KEY=$(SOPS_EXPECTED_AGE)"; \
+				exit 1; \
+			fi; \
+		done; \
+	fi; \
+	decrypt() { \
+		file="$$1"; \
+		if [ -n "$(SOPS_AGE_KEY_FILE)" ]; then \
+			SOPS_AGE_KEY_FILE="$(SOPS_AGE_KEY_FILE)" $(SOPS_CMD) -d $$file; \
+		else \
+			$(SOPS_CMD) -d $$file; \
+		fi; \
+	}; \
+	decrypt deploy/secrets/maintainerd-web-env.yaml | kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f -; \
+	decrypt deploy/secrets/maintainerd-web-bff-env.yaml | kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f -; \
+	echo "Web secrets applied from SOPS."'
+
+.PHONY: sops-encrypt-web-secrets
+sops-encrypt-web-secrets:
+	@bash -c 'set -euo pipefail; \
+	if [ -z "$(SOPS_AGE_KEY)" ]; then \
+		echo "Set SOPS_AGE_KEY to the age public key used for encryption."; exit 1; \
+	fi; \
+	for file in deploy/secrets/maintainerd-web-env.yaml deploy/secrets/maintainerd-web-bff-env.yaml; do \
+		if [ ! -f "$$file" ]; then \
+			echo "Missing $$file"; exit 1; \
+		fi; \
+		$(SOPS_CMD) --age $(SOPS_AGE_KEY) -e -i $$file; \
+	done; \
+	echo "Encrypted web secrets with sops.";'
+
+.PHONY: sops-envsubst-encrypt
+sops-envsubst-encrypt:
+	@bash -c 'set -euo pipefail; \
+	if [ -z "$(SOPS_AGE_KEY)" ]; then \
+		echo "Set SOPS_AGE_KEY to the age public key used for encryption."; exit 1; \
+	fi; \
+	for var in WEB_APP_BASE_URL GITHUB_OAUTH_REDIRECT_URL GITHUB_OAUTH_CLIENT_ID GITHUB_OAUTH_CLIENT_SECRET SESSION_COOKIE_NAME SESSION_COOKIE_DOMAIN SESSION_COOKIE_SECURE; do \
+		if [ -z "$${!var:-}" ]; then \
+			echo "Missing required env var: $$var"; exit 1; \
+		fi; \
+	done; \
+	envsubst < deploy/templates/maintainerd-web-env.yaml.tmpl > deploy/secrets/maintainerd-web-env.yaml; \
+	envsubst < deploy/templates/maintainerd-web-bff-env.yaml.tmpl > deploy/secrets/maintainerd-web-bff-env.yaml; \
+	$(MAKE) sops-encrypt-web-secrets SOPS_AGE_KEY="$(SOPS_AGE_KEY)" SOPS_CMD="$(SOPS_CMD)";'
+
+.PHONY: sops-edit-web-secrets
+sops-edit-web-secrets:
+	@bash -c 'set -euo pipefail; \
+	edit() { \
+		file="$$1"; \
+		if [ -n "$(SOPS_AGE_KEY_FILE)" ]; then \
+			SOPS_AGE_KEY_FILE="$(SOPS_AGE_KEY_FILE)" $(SOPS_CMD) "$$file"; \
+		else \
+			$(SOPS_CMD) "$$file"; \
+		fi; \
+		status=$$?; \
+		if [ $$status -ne 0 ] && [ $$status -ne 200 ]; then \
+			exit $$status; \
+		fi; \
+	}; \
+	edit deploy/secrets/maintainerd-web-env.yaml; \
+	edit deploy/secrets/maintainerd-web-bff-env.yaml;'
+
+.PHONY: deploy-web
+deploy-web:
+	@echo "Deploying web-bff + web + ingress + cert [ns=$(NAMESPACE)]"
+	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/manifests/web-bff-service.yaml
+	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/manifests/web-bff-deployment.yaml
+	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/manifests/web-service.yaml
+	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/manifests/web-deployment.yaml
+	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/manifests/ingress-maintainerd-web.yaml
+	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/manifests/certificate-github-events.yaml
 
 # Convenience combo target
 .PHONY: secrets

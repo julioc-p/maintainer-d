@@ -1,6 +1,6 @@
 # Certificate Maintenance for maintainer-d
 
-maintainer-d uses a manually issued Let’s Encrypt certificate stored in the `maintainerd-tls` secret. 
+maintainer-d uses a manually issued Let’s Encrypt certificate stored in the `maintainerd-tls` secret.
 
 Repeat these steps before the cert expires (every ~60–90 days):
 
@@ -41,3 +41,71 @@ Repeat these steps before the cert expires (every ~60–90 days):
    ```
 
 Keep `/etc/letsencrypt` backed up or document the certbot host. If you ever automate DNS updates, you can replace the manual step with cert-manager and remove the monthly coordination with DNSimple.
+
+## HTTP-01 cert-manager flow (current)
+
+We use cert-manager with HTTP-01 challenges and the nginx ingress controller. DNS for the public hosts must point at the nginx ingress controller LoadBalancer for issuance and renewal.
+
+Prerequisites:
+- `github-events.cncf.io` A record points to the nginx ingress controller external IP.
+- IngressClass `nginx` exists and is reachable from the public internet.
+
+Apply these manifests (checked into `deploy/manifests`):
+
+```bash
+kubectl apply -f deploy/manifests/clusterissuer-letsencrypt-http.yaml
+kubectl apply -f deploy/manifests/certificate-github-events.yaml
+kubectl apply -f deploy/manifests/ingress-github-events.yaml
+```
+
+Watch for completion:
+```bash
+kubectl -n maintainerd get certificate,order,challenge
+kubectl -n maintainerd describe certificate maintainerd-tls
+```
+
+When `maintainer-d.cncf.io` is ready, apply:
+```bash
+kubectl apply -f deploy/manifests/ingress-maintainerd-web.yaml
+```
+
+## Cutover checklist (adding maintainer-d.cncf.io)
+
+1. Confirm DNS:
+   ```bash
+   dig +short maintainer-d.cncf.io
+   ```
+   Expected: nginx ingress LoadBalancer IP.
+
+2. Apply the ingress:
+   ```bash
+   kubectl apply -f deploy/manifests/ingress-maintainerd-web.yaml
+   ```
+
+3. Update the certificate to include the new host:
+   ```bash
+   kubectl apply -f deploy/manifests/certificate-github-events.yaml
+   ```
+
+4. If a new Order/Challenge does not appear within a minute, force a reissue:
+   ```bash
+   kubectl -n maintainerd delete challenge,order \
+     -l acme.cert-manager.io/order-name=maintainerd-tls-1-3601081319
+   ```
+
+5. Watch issuance:
+   ```bash
+   kubectl -n maintainerd get certificate,order,challenge -w
+   ```
+
+6. Verify TLS:
+   ```bash
+   curl -vk https://maintainer-d.cncf.io/
+   openssl s_client -connect maintainer-d.cncf.io:443 -servername maintainer-d.cncf.io -tls1_2
+   ```
+
+7. Verify web and BFF routing:
+   ```bash
+   curl -vk https://maintainer-d.cncf.io/
+   curl -vk https://maintainer-d.cncf.io/api/healthz
+   ```

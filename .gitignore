@@ -16,4 +16,6 @@ coverage.out
 .config/
 testdata/*.db
 testdata/*.log
-web/.next/
+web/work/testdata/
+.next/
+./testdata/
