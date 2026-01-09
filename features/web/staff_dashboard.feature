@@ -34,6 +34,6 @@ Feature: Staff landing dashboard
       | Alpha        | alice            | FOSSA        |
       | Beta         | bob              | GitHub       |
 
-  Scenario: Staff sees current foudation stats
+  Scenario: Staff sees current foundation stats
     When I view the staff dashboad
     Then I see a summary of the full maintainer count, full project count, graduated project count, incubating project count, sandbox project count
