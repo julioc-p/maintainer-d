@@ -38,7 +38,9 @@
     "/tmp/maintainerd-testdata/next-dist/types/**/*.ts",
     "/tmp/maintainerd-testdata/next-dist/dev/types/**/*.ts",
     "/work/testdata/next-dist/types/**/*.ts",
-    "/work/testdata/next-dist/dev/types/**/*.ts"
+    "/work/testdata/next-dist/dev/types/**/*.ts",
+    "/home/rk/cncf/gh/maintainer-d/testdata/next-dist/types/**/*.ts",
+    "/home/rk/cncf/gh/maintainer-d/testdata/next-dist/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

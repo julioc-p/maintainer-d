@@ -311,14 +311,17 @@ web-bff-run:
 .PHONY: test-web
 test-web:
 	@bash -c 'set -euo pipefail; \
-	TESTDATA_DIR="$${TESTDATA_DIR:-/work/testdata}"; \
-	HOST_LOG_DIR="$${HOST_LOG_DIR:-/work/testdata}"; \
+	TESTDATA_DIR="$${TESTDATA_DIR:-$$(pwd)/testdata}"; \
+	HOST_LOG_DIR="$${HOST_LOG_DIR:-$$(pwd)/testdata}"; \
 	mkdir -p "$$TESTDATA_DIR"; \
-	bff_pid=""; web_pid=""; \
+		bff_pid=""; web_pid=""; \
 	cleanup() { \
 		status=$$?; \
 		if [ -n "$$web_pid" ] || [ -n "$$bff_pid" ]; then \
 			kill $$web_pid $$bff_pid >/dev/null 2>&1 || true; \
+		fi; \
+		if command -v lsof >/dev/null 2>&1; then \
+			lsof -ti TCP:8001 -ti TCP:3001 2>/dev/null | xargs -r kill >/dev/null 2>&1 || true; \
 		fi; \
 		if [ "$$TESTDATA_DIR" != "$$HOST_LOG_DIR" ]; then \
 			mkdir -p "$$HOST_LOG_DIR"; \
@@ -336,27 +339,55 @@ test-web:
 		exit $$status; \
 	}; \
 	trap cleanup EXIT; \
+	if command -v lsof >/dev/null 2>&1; then \
+		pids="$$(lsof -ti TCP:8001 -ti TCP:3001 2>/dev/null || true)"; \
+		if [ -n "$$pids" ]; then \
+			echo "Ports 8001/3001 are in use (PIDs: $$pids). Stop them and retry."; \
+			exit 1; \
+		fi; \
+	fi; \
 	rm -f "$$TESTDATA_DIR/maintainerd_test.db" || true; \
 	if [ -f "$$TESTDATA_DIR/maintainerd_test.db" ]; then \
 		echo "Failed to remove $$TESTDATA_DIR/maintainerd_test.db (check ownership/permissions)."; \
 		exit 1; \
 	fi; \
 	go run ./cmd/web-bff-seed -db "$$TESTDATA_DIR/maintainerd_test.db"; \
-	BFF_ADDR=:8001 BFF_TEST_MODE=true SESSION_COOKIE_SECURE=false MD_DB_PATH="$$TESTDATA_DIR/maintainerd_test.db" \
-	WEB_APP_BASE_URL=http://localhost:3001 GITHUB_OAUTH_CLIENT_ID=test GITHUB_OAUTH_CLIENT_SECRET=test \
+	BFF_ADDR=:8001 BFF_TEST_MODE=true SESSION_COOKIE_SECURE=false SESSION_COOKIE_DOMAIN= \
+	MD_DB_DRIVER=sqlite MD_DB_DSN= MD_DB_PATH="$$TESTDATA_DIR/maintainerd_test.db" \
+	WEB_APP_BASE_URL=http://localhost:3001 GITHUB_OAUTH_REDIRECT_URL=http://localhost:8001/auth/callback \
+	GITHUB_OAUTH_CLIENT_ID=test GITHUB_OAUTH_CLIENT_SECRET=test \
 	go run ./cmd/web-bff > >(tee "$$TESTDATA_DIR/web-bff-test.log") 2>&1 & \
 	bff_pid=$$!; \
 	mkdir -p "$$TESTDATA_DIR/tmp" web/tmp || true; \
 	NEXT_PUBLIC_BFF_BASE_URL=http://localhost:8001 NEXT_DIST_DIR="$$TESTDATA_DIR/next-dist" TMPDIR="$$TESTDATA_DIR/tmp" NEXT_TEMP_DIR="$$TESTDATA_DIR/tmp" \
-	NEXT_TELEMETRY_DISABLED=1 NPM_CONFIG_UPDATE_NOTIFIER=false TURBOPACK_ROOT=/work/web OUTPUT_FILE_TRACING_ROOT=/work/web \
+	NEXT_TELEMETRY_DISABLED=1 NPM_CONFIG_UPDATE_NOTIFIER=false TURBOPACK_ROOT="$$(pwd)/web" OUTPUT_FILE_TRACING_ROOT="$$(pwd)/web" \
 	npm --prefix web run build > "$$TESTDATA_DIR/web-build-test.log" 2>&1; \
 	PORT=3001 NEXT_PUBLIC_BFF_BASE_URL=http://localhost:8001 NEXT_DIST_DIR="$$TESTDATA_DIR/next-dist" TMPDIR="$$TESTDATA_DIR/tmp" NEXT_TEMP_DIR="$$TESTDATA_DIR/tmp" \
-	NEXT_TELEMETRY_DISABLED=1 NPM_CONFIG_UPDATE_NOTIFIER=false TURBOPACK_ROOT=/work/web OUTPUT_FILE_TRACING_ROOT=/work/web \
+	NEXT_TELEMETRY_DISABLED=1 NPM_CONFIG_UPDATE_NOTIFIER=false TURBOPACK_ROOT="$$(pwd)/web" OUTPUT_FILE_TRACING_ROOT="$$(pwd)/web" \
 	npm --prefix web run start > "$$TESTDATA_DIR/web-app-test.log" 2>&1 & \
 	web_pid=$$!; \
 	npx --prefix web wait-on http://localhost:8001/healthz http://localhost:3001 > /dev/null 2>&1; \
 	WEB_BASE_URL=http://localhost:3001 BFF_BASE_URL=http://localhost:8001 TEST_STAFF_LOGIN=staff-tester \
 	NEXT_TELEMETRY_DISABLED=1 NPM_CONFIG_UPDATE_NOTIFIER=false WEB_TEST_ARTIFACTS_DIR="$$TESTDATA_DIR/web-artifacts" npm --prefix web run test:bdd; \
+	'
+
+.PHONY: web-bdd
+web-bdd: test-web web-bdd-report
+
+.PHONY: web-bdd-report
+web-bdd-report:
+	@bash -c 'set -euo pipefail; \
+	BASE_DIR="$${HOST_LOG_DIR:-testdata}"; \
+	BASE_DIR_ABS="$$(cd "$$BASE_DIR" && pwd)"; \
+	JSON_PATH="$$BASE_DIR_ABS/web-bdd-report.json"; \
+	HTML_PATH="$$BASE_DIR_ABS/web-bdd-report.html"; \
+	if [ -f "$$JSON_PATH" ]; then \
+		(cd web && node -e "require(\"cucumber-html-reporter\").generate({ jsonFile: \"$$JSON_PATH\", output: \"$$HTML_PATH\", theme: \"bootstrap\", reportSuiteAsScenarios: true, launchReport: false, metadata: { App: \"maintainer-d\", Platform: \"Web\" } });"); \
+		if command -v xdg-open >/dev/null 2>&1; then xdg-open "$$HTML_PATH" >/dev/null 2>&1 || true; fi; \
+	else \
+		echo "Missing $$JSON_PATH; run test-web first."; \
+		exit 1; \
+	fi; \
 	'
 
 .PHONY: test-web-report
