@@ -47,7 +47,7 @@
   width: 90%;
   border-collapse: collapse;
   font-size: 13px;
-  align: center;
+  margin: 0 auto;
 }
 
 .maintainersTable th {
