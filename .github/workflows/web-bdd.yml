@@ -31,11 +31,31 @@ jobs:
           npx playwright install --with-deps
 
       - name: Run web BDD tests
-        run: make test-web
+        run: make web-bdd
+
+      - name: Dump web-bdd logs
+        if: failure()
+        run: |
+          echo "--- web-bff-test.log ---"
+          cat testdata/web-bff-test.log || true
+          echo "--- web-app-test.log ---"
+          cat testdata/web-app-test.log || true
+          echo "--- web-build-test.log ---"
+          cat testdata/web-build-test.log || true
 
       - name: Upload JUnit report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: web-bdd-junit
-          path: testdata/web-test-results.xml
+          path: testdata/web-bdd-results.xml
+
+      - name: Upload BDD artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-bdd-artifacts
+          path: |
+            testdata/web-bdd-report.json
+            testdata/web-bdd-report.html
+            testdata/web-artifacts
