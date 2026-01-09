@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,7 +27,6 @@ import (
 	ghoauth "golang.org/x/oauth2/github"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"sort"
 )
 
 func redactPostgresDSN(dsn string) (string, error) {
@@ -235,8 +235,9 @@ func main() {
 	mux.Handle("/api/", s.withCORS(s.requireSession(http.HandlerFunc(s.handleAPINotImplemented))))
 
 	server := &http.Server{
-		Addr:    addr,
-		Handler: mux,
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	logger.Printf("web-bff: starting on %s", addr)
@@ -327,7 +328,7 @@ func (s *server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.createSession(login, role, w); err != nil {
+	if err := s.createSession(login, role, w); err != nil {
 		http.Error(w, "failed to establish session", http.StatusInternalServerError)
 		return
 	}
@@ -359,13 +360,15 @@ func (s *server) handleTestLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.createSession(login, role, w); err != nil {
+	if err := s.createSession(login, role, w); err != nil {
 		http.Error(w, "failed to create session", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set(headerContentType, contentTypeJSON)
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		s.logger.Printf("web-bff: handleTestLogin encode error: %v", err)
+	}
 }
 
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -394,10 +397,10 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *server) createSession(login, role string, w http.ResponseWriter) (string, error) {
+func (s *server) createSession(login, role string, w http.ResponseWriter) error {
 	sessionID, err := randomToken(48)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	now := time.Now()
@@ -422,7 +425,7 @@ func (s *server) createSession(login, role string, w http.ResponseWriter) (strin
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	return sessionID, nil
+	return nil
 }
 
 func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -437,7 +440,9 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"role":  session.Role,
 	}
 	w.Header().Set(headerContentType, contentTypeJSON)
-	_ = json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		s.logger.Printf("web-bff: handleMe encode error: %v", err)
+	}
 }
 
 type projectSummary struct {
@@ -592,10 +597,12 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set(headerContentType, contentTypeJSON)
-	_ = json.NewEncoder(w).Encode(projectsResponse{
+	if err := json.NewEncoder(w).Encode(projectsResponse{
 		Total:    total,
 		Projects: projects,
-	})
+	}); err != nil {
+		s.logger.Printf("web-bff: handleProjects encode error: %v", err)
+	}
 }
 
 func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
@@ -701,7 +708,9 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set(headerContentType, contentTypeJSON)
-	_ = json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		s.logger.Printf("web-bff: handleProject encode error: %v", err)
+	}
 }
 
 type maintainerDetailResponse struct {
@@ -759,7 +768,9 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set(headerContentType, contentTypeJSON)
-	_ = json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		s.logger.Printf("web-bff: handleMaintainer encode error: %v", err)
+	}
 }
 
 type addMaintainerRequest struct {
@@ -820,7 +831,9 @@ func (s *server) handleMaintainerFromRef(w http.ResponseWriter, r *http.Request)
 		response.Company = maintainer.Company.Name
 	}
 	w.Header().Set(headerContentType, contentTypeJSON)
-	_ = json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		s.logger.Printf("web-bff: handleCompanies encode error: %v", err)
+	}
 }
 
 type companyResponse struct {
@@ -857,7 +870,9 @@ func (s *server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		w.Header().Set(headerContentType, contentTypeJSON)
-		_ = json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			s.logger.Printf("web-bff: handleCompanies encode error: %v", err)
+		}
 	case http.MethodPost:
 		if session.Role != roleStaff {
 			http.Error(w, "forbidden", http.StatusForbidden)
@@ -878,7 +893,9 @@ func (s *server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set(headerContentType, contentTypeJSON)
-		_ = json.NewEncoder(w).Encode(companyResponse{ID: company.ID, Name: company.Name})
+		if err := json.NewEncoder(w).Encode(companyResponse{ID: company.ID, Name: company.Name}); err != nil {
+			s.logger.Printf("web-bff: handleCompanies encode error: %v", err)
+		}
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}

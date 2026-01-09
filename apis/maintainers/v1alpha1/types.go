@@ -38,6 +38,9 @@ const (
 	MaintainerHidden MaintainerLifecycle = "Hidden"
 )
 
+// ProjectMaturity enumerates CNCF project maturity levels.
+type ProjectMaturity string
+
 const (
 	MaturitySandbox    ProjectMaturity = "Sandbox"
 	MaturityIncubating ProjectMaturity = "Incubating"
