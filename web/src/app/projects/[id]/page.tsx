@@ -300,6 +300,22 @@ export default function ProjectPage() {
               isRefreshing={status === "loading"}
               canEdit={role === "staff"}
               companyOptions={companies}
+              onUpdateMaintainerRef={async (nextRef) => {
+                if (!projectId) {
+                  return;
+                }
+                const response = await fetch(`${apiBaseUrl}/projects/${projectId}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  body: JSON.stringify({ maintainerRef: nextRef }),
+                });
+                if (!response.ok) {
+                  setError("Unable to update project admin file");
+                  throw new Error("update failed");
+                }
+                await handleRefresh();
+              }}
               onAddMaintainer={async (payload: AddMaintainerPayload) => {
                 if (!projectId) {
                   return;

@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Dropdown } from "clo-ui/components/Dropdown";
 import { Footer } from "clo-ui/components/Footer";
 import { Navbar } from "clo-ui/components/Navbar";
@@ -27,6 +27,7 @@ export default function AppShell({
   const [meStatus, setMeStatus] = useState<"idle" | "loading" | "ready">(
     "idle"
   );
+  const devLoginAttemptedRef = useRef(false);
 
   const bffBaseUrl = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_BFF_BASE_URL || "/api";
@@ -78,6 +79,7 @@ export default function AppShell({
 
   useEffect(() => {
     let alive = true;
+    const devLogin = (process.env.NEXT_PUBLIC_DEV_AUTH_LOGIN || "").trim();
     const loadMe = async () => {
       setMeStatus("loading");
       try {
@@ -86,6 +88,27 @@ export default function AppShell({
         });
         if (!response.ok) {
           if (response.status === 401) {
+            if (
+              devLogin &&
+              !devLoginAttemptedRef.current &&
+              typeof window !== "undefined"
+            ) {
+              devLoginAttemptedRef.current = true;
+              try {
+                const testLogin = await fetch(
+                  `${authBaseUrl}/auth/test-login?login=${encodeURIComponent(
+                    devLogin
+                  )}`,
+                  { credentials: "include" }
+                );
+                if (testLogin.ok) {
+                  await loadMe();
+                  return;
+                }
+              } catch (error) {
+                // Ignore dev login failures; fall back to unauthenticated state.
+              }
+            }
             if (alive) {
               setMe(null);
             }

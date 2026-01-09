@@ -24,6 +24,7 @@ type Store interface {
 	CreateServiceTeamForUser(interface{ any }) (*model.ServiceTeam, error)
 	CreateMaintainer(projectID uint, name, email, githubHandle, company string) (*model.Maintainer, error)
 	CreateCompany(name string) (*model.Company, error)
+	UpdateProjectMaintainerRef(projectID uint, ref string) error
 	ListCompanies() ([]model.Company, error)
 	ListStaffMembers() ([]model.StaffMember, error)
 }
