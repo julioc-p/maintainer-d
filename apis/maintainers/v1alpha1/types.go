@@ -34,7 +34,7 @@ const (
 	MaintainerEmeritus MaintainerLifecycle = "Emeritus"
 	// MaintainerRetired represents a maintainer who is no longer participating.
 	MaintainerRetired MaintainerLifecycle = "Retired"
-	// MaintainerHidden represents a maintainer who was a hidden row in the legacy internal worksheet 
+	// MaintainerHidden represents a maintainer who was a hidden row in the legacy internal worksheet.
 	MaintainerHidden MaintainerLifecycle = "Hidden"
 )
 
