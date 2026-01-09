@@ -134,6 +134,15 @@ export default function ProjectPage() {
     const raw = process.env.NEXT_PUBLIC_BFF_BASE_URL || "/api";
     return raw.replace(/\/+$/, "");
   }, []);
+  const apiBaseUrl = useMemo(() => {
+    if (bffBaseUrl === "") {
+      return "/api";
+    }
+    if (bffBaseUrl.endsWith("/api")) {
+      return bffBaseUrl;
+    }
+    return `${bffBaseUrl}/api`;
+  }, [bffBaseUrl]);
 
   useEffect(() => {
     let alive = true;
@@ -150,7 +159,7 @@ export default function ProjectPage() {
       }
       try {
         const response = await fetch(
-          `${bffBaseUrl}/api/projects/${projectId}`,
+          `${apiBaseUrl}/projects/${projectId}`,
           { credentials: "include" }
         );
         if (!response.ok) {
@@ -181,13 +190,13 @@ export default function ProjectPage() {
     return () => {
       alive = false;
     };
-  }, [bffBaseUrl, projectId, router]);
+  }, [apiBaseUrl, projectId, router]);
 
   useEffect(() => {
     let alive = true;
     const loadRole = async () => {
       try {
-        const response = await fetch(`${bffBaseUrl}/api/me`, { credentials: "include" });
+        const response = await fetch(`${apiBaseUrl}/me`, { credentials: "include" });
         if (!response.ok) {
           return;
         }
@@ -203,7 +212,7 @@ export default function ProjectPage() {
     return () => {
       alive = false;
     };
-  }, [bffBaseUrl]);
+  }, [apiBaseUrl]);
 
   useEffect(() => {
     let alive = true;
@@ -212,7 +221,7 @@ export default function ProjectPage() {
         return;
       }
       try {
-        const response = await fetch(`${bffBaseUrl}/api/companies`, {
+        const response = await fetch(`${apiBaseUrl}/companies`, {
           credentials: "include",
         });
         if (!response.ok) {
@@ -235,7 +244,7 @@ export default function ProjectPage() {
     return () => {
       alive = false;
     };
-  }, [bffBaseUrl, role]);
+  }, [apiBaseUrl, role]);
 
   const handleRefresh = async () => {
     if (!projectId) {
@@ -244,7 +253,7 @@ export default function ProjectPage() {
     setStatus("loading");
     setError(null);
     try {
-      const response = await fetch(`${bffBaseUrl}/api/projects/${projectId}`, {
+      const response = await fetch(`${apiBaseUrl}/projects/${projectId}`, {
         credentials: "include",
       });
       if (!response.ok) {
@@ -296,7 +305,7 @@ export default function ProjectPage() {
                   return;
                 }
                 if (payload.companyMode === "new" && payload.company.trim() !== "") {
-                  const companyResponse = await fetch(`${bffBaseUrl}/api/companies`, {
+                  const companyResponse = await fetch(`${apiBaseUrl}/companies`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     credentials: "include",
@@ -307,7 +316,7 @@ export default function ProjectPage() {
                     return;
                   }
                 }
-                const response = await fetch(`${bffBaseUrl}/api/maintainers/from-ref`, {
+                const response = await fetch(`${apiBaseUrl}/maintainers/from-ref`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   credentials: "include",

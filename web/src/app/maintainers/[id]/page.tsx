@@ -59,6 +59,15 @@ export default function MaintainerPage() {
     const raw = process.env.NEXT_PUBLIC_BFF_BASE_URL || "/api";
     return raw.replace(/\/+$/, "");
   }, []);
+  const apiBaseUrl = useMemo(() => {
+    if (bffBaseUrl === "") {
+      return "/api";
+    }
+    if (bffBaseUrl.endsWith("/api")) {
+      return bffBaseUrl;
+    }
+    return `${bffBaseUrl}/api`;
+  }, [bffBaseUrl]);
 
   useEffect(() => {
     let alive = true;
@@ -75,7 +84,7 @@ export default function MaintainerPage() {
       }
       try {
         const response = await fetch(
-          `${bffBaseUrl}/api/maintainers/${maintainerId}`,
+          `${apiBaseUrl}/maintainers/${maintainerId}`,
           { credentials: "include" }
         );
         if (!response.ok) {

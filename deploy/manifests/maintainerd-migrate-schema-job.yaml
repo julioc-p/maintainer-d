@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: maintainerd-migrate
+  name: maintainerd-bootstrap
   namespace: maintainerd
 spec:
   backoffLimit: 1
@@ -12,26 +12,23 @@ spec:
       imagePullSecrets:
         - name: ghcr-secret
       containers:
-        - name: migrate
+        - name: bootstrap
           image: ghcr.io/robertkielty/maintainerd:latest
           imagePullPolicy: Always
-          command: ["/usr/local/bin/bootstrap", "--seed=false", "--backup=false", "--db", "/data/maintainers.db"]
+          command: ["/usr/local/bin/bootstrap", "--seed", "--backup=false", "--db-driver=$(MD_DB_DRIVER)", "--db-dsn=$(MD_DB_DSN)"]
           envFrom:
             - secretRef:
                 name: maintainerd-bootstrap-env
+            - secretRef:
+                name: maintainerd-db-env
           env:
             - name: WORKSPACE_CREDENTIALS_FILE
               value: /creds/credentials.json
           volumeMounts:
-            - name: db
-              mountPath: /data
             - name: creds
               mountPath: /creds
               readOnly: true
       volumes:
-        - name: db
-          persistentVolumeClaim:
-            claimName: maintainerd-db
         - name: creds
           secret:
             secretName: workspace-credentials

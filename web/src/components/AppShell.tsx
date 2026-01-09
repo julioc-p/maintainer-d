@@ -33,6 +33,24 @@ export default function AppShell({
     return raw.replace(/\/+$/, "");
   }, []);
 
+  const apiBaseUrl = useMemo(() => {
+    if (bffBaseUrl === "") {
+      return "/api";
+    }
+    if (bffBaseUrl.endsWith("/api")) {
+      return bffBaseUrl;
+    }
+    return `${bffBaseUrl}/api`;
+  }, [bffBaseUrl]);
+
+  const authBaseUrl = useMemo(() => {
+    if (bffBaseUrl.endsWith("/api")) {
+      const stripped = bffBaseUrl.slice(0, -4);
+      return stripped === "" ? "" : stripped;
+    }
+    return bffBaseUrl;
+  }, [bffBaseUrl]);
+
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -63,7 +81,7 @@ export default function AppShell({
     const loadMe = async () => {
       setMeStatus("loading");
       try {
-        const response = await fetch(`${bffBaseUrl}/api/me`, {
+        const response = await fetch(`${apiBaseUrl}/me`, {
           credentials: "include",
         });
         if (!response.ok) {
@@ -97,7 +115,7 @@ export default function AppShell({
 
   const handleLogout = async () => {
     try {
-      await fetch(`${bffBaseUrl}/auth/logout`, {
+      await fetch(`${authBaseUrl}/auth/logout`, {
         method: "POST",
         credentials: "include",
       });
@@ -143,7 +161,7 @@ export default function AppShell({
             ) : (
               <a
                 className={styles.loginButton}
-                href={`${bffBaseUrl}/auth/login?next=/`}
+                href={`${authBaseUrl}/auth/login?next=/`}
               >
                 Sign in with GitHub
               </a>

@@ -25,6 +25,8 @@ const (
 
 func main() {
 	var dbPath string
+	var dbDriver string
+	var dbDSN string
 	var seed bool
 	var doBackup bool
 	var maxBackups int
@@ -47,7 +49,7 @@ func main() {
 			if credentialsPath == "" {
 				log.Fatalf("ERROR: environment variable %s is not set", googleWorkspaceCredentials)
 			}
-			if doBackup {
+			if doBackup && dbDriver == "sqlite" {
 				if _, err := os.Stat(dbPath); err == nil {
 					info, err := os.Stat(dbPath)
 					if err == nil {
@@ -62,7 +64,14 @@ func main() {
 					pruneOldBackups(dbPath, maxBackups)
 				}
 			}
-			_, err := db.BootstrapSQLite(dbPath, spreadsheetID, credentialsPath, fossaToken, seed)
+			dsn := dbPath
+			if dbDriver == "postgres" {
+				if dbDSN == "" {
+					log.Fatal("ERROR: --db-dsn is required when --db-driver=postgres")
+				}
+				dsn = dbDSN
+			}
+			_, err := db.BootstrapDB(dbDriver, dsn, spreadsheetID, credentialsPath, fossaToken, seed)
 			if err != nil {
 				log.Fatalf("bootstrap failed: %v", err)
 			}
@@ -71,6 +80,8 @@ func main() {
 	}
 
 	rootCmd.Flags().StringVar(&dbPath, "db", defaultDBPath, "Path to SQLite database file")
+	rootCmd.Flags().StringVar(&dbDriver, "db-driver", "sqlite", "Database driver (sqlite or postgres)")
+	rootCmd.Flags().StringVar(&dbDSN, "db-dsn", "", "Database DSN (required for postgres)")
 	rootCmd.Flags().BoolVar(&seed, "seed", true, "Whether to load seed data into the database")
 	rootCmd.Flags().BoolVar(&doBackup, "backup", true, "Whether to create a backup of the database if it exists")
 	rootCmd.Flags().IntVar(&maxBackups, "max-backups", defaultMaxBackups, "Maximum number of backups to retain")

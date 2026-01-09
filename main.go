@@ -14,6 +14,8 @@ func main() {
 	// command‑line flags
 	var (
 		dbPath        = flag.String("db-path", "/data/onboarding.db", "Path to SQLite database file")
+		dbDriver      = flag.String("db-driver", "sqlite", "Database driver (sqlite or postgres)")
+		dbDSN         = flag.String("db-dsn", "", "Database DSN (required for postgres)")
 		fossaEnvVar   = flag.String("fossa-token-env", "FOSSA_API_TOKEN", "Name of the env var holding the FOSSA API token")
 		webhookSecret = flag.String("webhook-secret", "", "GitHub webhook secret (raw string)")
 		addr          = flag.String("addr", "2525", "Address to listen on (e.g. :2525)")
@@ -60,7 +62,14 @@ func main() {
 	listener := &onboarding.EventListener{
 		Secret: []byte(*webhookSecret),
 	}
-	if err := listener.Init(*dbPath, *fossaEnvVar, *ghToken, *ghOrg, *ghRep); err != nil {
+	dsn := *dbPath
+	if *dbDriver == "postgres" {
+		if *dbDSN == "" {
+			log.Fatal("must provide --db-dsn when --db-driver=postgres")
+		}
+		dsn = *dbDSN
+	}
+	if err := listener.Init(*dbDriver, dsn, *fossaEnvVar, *ghToken, *ghOrg, *ghRep); err != nil {
 		log.Fatalf("maintainerd: ERR, failed to init EventListener: %v", err)
 	}
 

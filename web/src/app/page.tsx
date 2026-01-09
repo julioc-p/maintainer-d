@@ -34,6 +34,15 @@ export default function Home() {
     const raw = process.env.NEXT_PUBLIC_BFF_BASE_URL || "/api";
     return raw.replace(/\/+$/, "");
   }, []);
+  const apiBaseUrl = useMemo(() => {
+    if (bffBaseUrl === "") {
+      return "/api";
+    }
+    if (bffBaseUrl.endsWith("/api")) {
+      return bffBaseUrl;
+    }
+    return `${bffBaseUrl}/api`;
+  }, [bffBaseUrl]);
 
   const handleSearch = () => {
     // Placeholder: wire this to the BFF search endpoint.
@@ -61,7 +70,7 @@ export default function Home() {
           params.set("maturity", activeMaturity.join(","));
         }
         const response = await fetch(
-          `${bffBaseUrl}/api/projects?${params.toString()}`,
+          `${apiBaseUrl}/projects?${params.toString()}`,
           { credentials: "include" }
         );
         if (!response.ok) {

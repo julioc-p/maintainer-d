@@ -140,6 +140,7 @@ Notes:
 ## Secrets with SOPS (production)
 
 We use SOPS + age for encrypted Kubernetes Secrets stored in `deploy/secrets/`.
+Postgres deployments require `MD_DB_DRIVER=postgres` and `MD_DB_DSN=...` in `maintainerd-db-env`.
 
 1) Generate or retrieve the age key:
 ```
@@ -153,9 +154,11 @@ The public key goes in `.sops.yaml`.
 mkdir -p deploy/secrets
 cp deploy/templates/maintainerd-web-env.yaml.tmpl deploy/secrets/maintainerd-web-env.yaml
 cp deploy/templates/maintainerd-web-bff-env.yaml.tmpl deploy/secrets/maintainerd-web-bff-env.yaml
+cp deploy/templates/maintainerd-db-env.yaml.tmpl deploy/secrets/maintainerd-db-env.yaml
 # fill in values, then:
 sops -e -i deploy/secrets/maintainerd-web-env.yaml
 sops -e -i deploy/secrets/maintainerd-web-bff-env.yaml
+sops -e -i deploy/secrets/maintainerd-db-env.yaml
 ```
 
 3) Encrypt secrets (first time):

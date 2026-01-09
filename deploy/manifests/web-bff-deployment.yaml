@@ -26,14 +26,5 @@ spec:
           envFrom:
             - secretRef:
                 name: maintainerd-web-bff-env
-          env:
-            - name: MD_DB_PATH
-              value: /data/maintainers.db
-          volumeMounts:
-            - name: db
-              mountPath: /data
-              readOnly: true
-      volumes:
-        - name: db
-          persistentVolumeClaim:
-            claimName: maintainerd-db
+            - secretRef:
+                name: maintainerd-db-env

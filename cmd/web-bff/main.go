@@ -24,11 +24,33 @@ import (
 	"github.com/google/go-github/v55/github"
 	"golang.org/x/oauth2"
 	ghoauth "golang.org/x/oauth2/github"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"sort"
 )
+
+func redactPostgresDSN(dsn string) (string, error) {
+	parts := strings.Fields(dsn)
+	kv := make(map[string]string, len(parts))
+	for _, part := range parts {
+		split := strings.SplitN(part, "=", 2)
+		if len(split) != 2 {
+			continue
+		}
+		kv[split[0]] = split[1]
+	}
+	user := kv["user"]
+	host := kv["host"]
+	port := kv["port"]
+	dbname := kv["dbname"]
+	if host == "" || dbname == "" {
+		return "", fmt.Errorf("missing host/dbname in DSN")
+	}
+	if port == "" {
+		port = "5432"
+	}
+	return fmt.Sprintf("user=%s host=%s port=%s dbname=%s password=***", user, host, port, dbname), nil
+}
 
 const (
 	defaultAddr              = ":8000"
@@ -91,6 +113,8 @@ func main() {
 	logger := log.New(os.Stdout, "", log.LstdFlags)
 
 	addr := envOr("BFF_ADDR", defaultAddr)
+	dbDriver := envOr("MD_DB_DRIVER", "sqlite")
+	dbDSN := envOr("MD_DB_DSN", "")
 	dbPath := envOr("MD_DB_PATH", defaultDBPath)
 	webBaseURL := envOr("WEB_APP_BASE_URL", defaultWebBaseURL)
 	redirectURL := envOr("GITHUB_OAUTH_REDIRECT_URL", defaultRedirectCallback)
@@ -103,20 +127,39 @@ func main() {
 
 	clientID := os.Getenv("GITHUB_OAUTH_CLIENT_ID")
 	clientSecret := os.Getenv("GITHUB_OAUTH_CLIENT_SECRET")
-	logger.Printf(
-		"web-bff: config addr=%s dbPath=%s webBaseURL=%s redirectURL=%s cookieName=%s cookieDomain=%s stateCookie=%s sessionTTL=%s cookieSecure=%t testMode=%t clientID=%s",
-		addr,
-		dbPath,
-		webBaseURL,
-		redirectURL,
-		cookieName,
-		cookieDomain,
-		stateCookie,
-		sessionTTL,
-		cookieSecure,
-		testMode,
-		clientID,
-	)
+	if dbDriver == "sqlite" {
+		logger.Printf(
+			"web-bff: config addr=%s dbDriver=%s dbPath=%s webBaseURL=%s redirectURL=%s cookieName=%s cookieDomain=%s stateCookie=%s sessionTTL=%s cookieSecure=%t testMode=%t clientID=%s",
+			addr,
+			dbDriver,
+			dbPath,
+			webBaseURL,
+			redirectURL,
+			cookieName,
+			cookieDomain,
+			stateCookie,
+			sessionTTL,
+			cookieSecure,
+			testMode,
+			clientID,
+		)
+	} else {
+		logger.Printf(
+			"web-bff: config addr=%s dbDriver=%s dbDSNSet=%t webBaseURL=%s redirectURL=%s cookieName=%s cookieDomain=%s stateCookie=%s sessionTTL=%s cookieSecure=%t testMode=%t clientID=%s",
+			addr,
+			dbDriver,
+			dbDSN != "",
+			webBaseURL,
+			redirectURL,
+			cookieName,
+			cookieDomain,
+			stateCookie,
+			sessionTTL,
+			cookieSecure,
+			testMode,
+			clientID,
+		)
+	}
 	if !testMode && (clientID == "" || clientSecret == "") {
 		logger.Fatal("web-bff: GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET must be set")
 	}
@@ -125,6 +168,9 @@ func main() {
 	}
 	if testMode && clientSecret == "" {
 		clientSecret = "test-secret"
+	}
+	if dbDriver == "postgres" && dbDSN == "" {
+		logger.Fatal("web-bff: MD_DB_DSN is required when MD_DB_DRIVER=postgres")
 	}
 
 	redirectURLParsed, err := url.Parse(redirectURL)
@@ -135,7 +181,19 @@ func main() {
 		cookieSecure = redirectURLParsed.Scheme == "https"
 	}
 
-	store, err := openStore(dbPath)
+	dsn := dbPath
+	if dbDriver == "postgres" {
+		dsn = dbDSN
+	}
+	if dbDriver == "postgres" && dbDSN != "" {
+		logDB, err := redactPostgresDSN(dbDSN)
+		if err != nil {
+			logger.Printf("web-bff: using postgres DSN (failed to parse details): %v", err)
+		} else {
+			logger.Printf("web-bff: using postgres DSN %s", logDB)
+		}
+	}
+	store, err := openStore(dbDriver, dsn)
 	if err != nil {
 		logger.Fatalf("web-bff: failed to open database: %v", err)
 	}
@@ -187,8 +245,8 @@ func main() {
 	}
 }
 
-func openStore(dbPath string) (*db.SQLStore, error) {
-	gormDB, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+func openStore(driver, dsn string) (*db.SQLStore, error) {
+	gormDB, err := db.OpenGorm(driver, dsn, &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
@@ -394,6 +452,11 @@ type projectsResponse struct {
 	Projects []projectSummary `json:"projects"`
 }
 
+type projectIDRow struct {
+	ID   uint   `gorm:"column:id"`
+	Name string `gorm:"column:name"`
+}
+
 type maintainerSummary struct {
 	ID     uint   `json:"id"`
 	Name   string `json:"name"`
@@ -473,21 +536,27 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 
 	var total int64
 	if err := base.Distinct("projects.id").Count(&total).Error; err != nil {
+		s.logger.Printf("web-bff: handleProjects count error: %v", err)
 		http.Error(w, "failed to count projects", http.StatusInternalServerError)
 		return
 	}
 
 	order := "projects." + sortBy + " " + direction
-	var ids []uint
+	var rows []projectIDRow
 	if err := base.
-		Select("projects.id").
+		Select("projects.id, projects.name").
 		Distinct().
 		Order(order).
 		Limit(limit).
 		Offset(offset).
-		Pluck("projects.id", &ids).Error; err != nil {
+		Scan(&rows).Error; err != nil {
+		s.logger.Printf("web-bff: handleProjects list ids error: %v", err)
 		http.Error(w, "failed to load projects", http.StatusInternalServerError)
 		return
+	}
+	ids := make([]uint, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
 	}
 
 	projects := make([]projectSummary, 0, len(ids))
@@ -497,6 +566,7 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 			Preload("Maintainers").
 			Where("projects.id IN ?", ids).
 			Find(&results).Error; err != nil {
+			s.logger.Printf("web-bff: handleProjects load projects error: %v", err)
 			http.Error(w, "failed to load projects", http.StatusInternalServerError)
 			return
 		}

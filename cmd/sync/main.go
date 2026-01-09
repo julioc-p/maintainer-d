@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"regexp"
 	"strings"
 
 	apis "maintainerd/apis/maintainers/v1alpha1"
 	"maintainerd/db"
 
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -30,7 +30,17 @@ const (
 func main() {
 	ctx := context.Background()
 
-	dbConn, err := openDB(defaultDBPath)
+	dbDriver := envOr("MD_DB_DRIVER", "sqlite")
+	dbDSN := envOr("MD_DB_DSN", "")
+	dbPath := envOr("MD_DB_PATH", defaultDBPath)
+	if dbDriver == "postgres" && dbDSN == "" {
+		log.Fatal("MD_DB_DSN is required when MD_DB_DRIVER=postgres")
+	}
+	dsn := dbPath
+	if dbDriver == "postgres" {
+		dsn = dbDSN
+	}
+	dbConn, err := openDB(dbDriver, dsn)
 	if err != nil {
 		log.Fatalf("failed to open DB: %v", err)
 	}
@@ -48,12 +58,15 @@ func main() {
 	log.Println("sync completed successfully")
 }
 
-func openDB(path string) (*gorm.DB, error) {
-	dbConn, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
-	if err != nil {
-		return nil, err
+func openDB(driver, dsn string) (*gorm.DB, error) {
+	return db.OpenGorm(driver, dsn, &gorm.Config{})
+}
+
+func envOr(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
 	}
-	return dbConn, nil
+	return fallback
 }
 
 func newClient() (client.Client, error) {
