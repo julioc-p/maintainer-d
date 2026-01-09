@@ -40,7 +40,7 @@ Given("I am signed in as a maintainer for project {string}", async function (_pr
 When("I view the projects list", pending);
 When("I view project {string}", pending);
 When("I view the staff dashboard", pending);
-When("I view the staff dashboad", pending);
+When("I view the staff dashboard", pending);
 When("I attempt to view project {string}", pending);
 When("I attempt to edit project {string}", pending);
 When(
