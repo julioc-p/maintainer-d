@@ -163,7 +163,7 @@ export default function ProjectReconciliationCard({
           </div>
           <div className={styles.meta}>
             <span className={styles.metaItem}>
-              Imported from goolge worksheet on {formatDate(createdAt)}
+              Imported from google worksheet on {formatDate(createdAt)}
             </span>
             <span className={styles.metaItem}>Last edited {formatDate(updatedAt)}</span>
           </div>
