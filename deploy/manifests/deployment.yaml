@@ -16,30 +16,14 @@ spec:
     spec:
       imagePullSecrets:
         - name: ghcr-secret
-      initContainers:
-        - name: bootstrap
-          image: ghcr.io/robertkielty/maintainerd:latest
-          imagePullPolicy: Always
-          command: ["/usr/local/bin/bootstrap", "--seed", "--db", "/data/maintainers.db"]
-          envFrom:
-            - secretRef:
-                name: maintainerd-bootstrap-env
-          env:
-            - name: WORKSPACE_CREDENTIALS_FILE
-              value: /creds/credentials.json
-          volumeMounts:
-            - name: db
-              mountPath: /data
-            - name: creds
-              mountPath: /creds
-              readOnly: true
       containers:
         - name: server
           image: ghcr.io/robertkielty/maintainerd:latest
           imagePullPolicy: Always
           args:
             - "-addr=:2525"
-            - "-db-path=/data/maintainers.db"
+            - "-db-driver=$(MD_DB_DRIVER)"
+            - "-db-dsn=$(MD_DB_DSN)"
             - "-fossa-token-env=FOSSA_API_TOKEN"
             - "-org=$ORG"
             - "-repo=$REPO"
@@ -49,13 +33,5 @@ spec:
           envFrom:
             - secretRef:
                 name: maintainerd-bootstrap-env
-          volumeMounts:
-            - name: db
-              mountPath: /data
-      volumes:
-        - name: db
-          persistentVolumeClaim:
-            claimName: maintainerd-db
-        - name: creds
-          secret:
-            secretName: workspace-credentials
+            - secretRef:
+                name: maintainerd-db-env

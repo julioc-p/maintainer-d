@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: maintainerd-web
+  namespace: maintainerd
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-http
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - maintainer-d.cncf.io
+      secretName: maintainerd-tls
+  rules:
+    - host: maintainer-d.cncf.io
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: maintainerd-web-bff
+                port:
+                  number: 8000
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: maintainerd-web-bff
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: maintainerd-web
+                port:
+                  number: 3000

@@ -13,7 +13,6 @@ import (
 
 	"golang.org/x/oauth2"
 	"google.golang.org/api/sourcerepo/v1"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
 	"github.com/google/go-github/v55/github"
@@ -34,11 +33,11 @@ type EventListener struct {
 	GitHubClient *github.Client
 }
 
-func (s *EventListener) Init(dbPath, fossaAPItokenEnvVar, ghToken, org, repo string) error {
-	dbConn, err := gorm.Open(sqlite.Open(dbPath))
+func (s *EventListener) Init(dbDriver, dbDSN, fossaAPItokenEnvVar, ghToken, org, repo string) error {
+	dbConn, err := db.OpenGorm(dbDriver, dbDSN, &gorm.Config{})
 	if err != nil {
 		log.Printf("error: failed to connect to db: %v", err)
-		return fmt.Errorf("connect ``to db: %w", err)
+		return fmt.Errorf("connect to db: %w", err)
 	}
 	s.Store = db.NewSQLStore(dbConn)
 

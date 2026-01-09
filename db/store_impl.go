@@ -21,6 +21,11 @@ func NewSQLStore(db *gorm.DB) *SQLStore {
 	return &SQLStore{db: db}
 }
 
+// DB returns the underlying gorm DB handle for read-only queries.
+func (s *SQLStore) DB() *gorm.DB {
+	return s.db
+}
+
 // Ping verifies the underlying database connection is healthy.
 func (s *SQLStore) Ping(ctx context.Context) error {
 	if s == nil || s.db == nil {
@@ -49,6 +54,131 @@ func (s *SQLStore) GetProjectsUsingService(serviceID uint) ([]model.Project, err
 		Preload("Maintainers.Company").
 		Find(&projects).Error
 	return projects, err
+}
+
+func (s *SQLStore) GetProjectByID(projectID uint) (*model.Project, error) {
+	var project model.Project
+	err := s.db.
+		Preload("Maintainers").
+		Preload("Services").
+		First(&project, projectID).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrProjectNotFound
+		}
+		return nil, err
+	}
+	return &project, nil
+}
+
+func (s *SQLStore) CreateMaintainer(projectID uint, name, email, githubHandle, company string) (*model.Maintainer, error) {
+	tx := s.db.Begin()
+	if tx.Error != nil {
+		return nil, tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	var project model.Project
+	if err := tx.First(&project, projectID).Error; err != nil {
+		tx.Rollback()
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrProjectNotFound
+		}
+		return nil, err
+	}
+
+	var maintainer model.Maintainer
+	if githubHandle != "" {
+		if err := tx.Where("LOWER(git_hub_account) = ?", strings.ToLower(githubHandle)).
+			First(&maintainer).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			tx.Rollback()
+			return nil, err
+		}
+	}
+	if maintainer.ID == 0 && email != "" {
+		if err := tx.Where("LOWER(email) = ?", strings.ToLower(email)).
+			First(&maintainer).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			tx.Rollback()
+			return nil, err
+		}
+	}
+
+	var companyModel *model.Company
+	if company != "" {
+		var c model.Company
+		if err := tx.Where("name = ?", company).FirstOrCreate(&c).Error; err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+		companyModel = &c
+	}
+
+	if maintainer.ID == 0 {
+		maintainer = model.Maintainer{
+			Name:             name,
+			Email:            normalizeOrSentinel(email, "EMAIL_MISSING"),
+			GitHubAccount:    normalizeOrSentinel(githubHandle, "GITHUB_MISSING"),
+			GitHubEmail:      "GITHUB_MISSING",
+			MaintainerStatus: model.ActiveMaintainer,
+		}
+		if companyModel != nil {
+			maintainer.CompanyID = &companyModel.ID
+			maintainer.Company = *companyModel
+		}
+		if err := tx.Create(&maintainer).Error; err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+	} else if companyModel != nil && maintainer.CompanyID == nil {
+		maintainer.CompanyID = &companyModel.ID
+		maintainer.Company = *companyModel
+		if err := tx.Save(&maintainer).Error; err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+	}
+
+	if err := tx.Model(&maintainer).Association("Projects").Append(&project); err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return nil, err
+	}
+	return &maintainer, nil
+}
+
+func normalizeOrSentinel(value, sentinel string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return sentinel
+	}
+	return trimmed
+}
+
+// CreateCompany creates or retrieves a company by name.
+func (s *SQLStore) CreateCompany(name string) (*model.Company, error) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return nil, fmt.Errorf("company name is required")
+	}
+	var existing model.Company
+	if err := s.db.Where("LOWER(name) = ?", strings.ToLower(trimmed)).First(&existing).Error; err == nil {
+		return nil, ErrCompanyExists
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	company := model.Company{Name: trimmed}
+	if err := s.db.Create(&company).Error; err != nil {
+		return nil, err
+	}
+	return &company, nil
 }
 
 func (s *SQLStore) GetMaintainersByProject(projectID uint) ([]model.Maintainer, error) {

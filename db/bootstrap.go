@@ -15,7 +15,6 @@ import (
 
 	"google.golang.org/api/option"
 	"google.golang.org/api/sheets/v4"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -34,7 +33,7 @@ const (
 	MailingListAddrHdr   string = "Mailing List Address"
 )
 
-func BootstrapSQLite(dbPath, spreadsheetID, worksheetCredentialsPath, fossaToken string, seed bool) (*gorm.DB, error) {
+func BootstrapDB(driver, dsn, spreadsheetID, worksheetCredentialsPath, fossaToken string, seed bool) (*gorm.DB, error) {
 	newLogger := logger.New(
 		log.New(os.Stdout, "\r\n", log.LstdFlags), // io writer
 		logger.Config{
@@ -45,8 +44,9 @@ func BootstrapSQLite(dbPath, spreadsheetID, worksheetCredentialsPath, fossaToken
 			Colorful:                  false,         // Disable color
 		},
 	)
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
-		Logger: newLogger,
+	db, err := OpenGorm(driver, dsn, &gorm.Config{
+		Logger:                                   newLogger,
+		DisableForeignKeyConstraintWhenMigrating: true,
 	})
 	// var s Store = NewSQLStore(db)
 	if err != nil {
@@ -105,8 +105,13 @@ func BootstrapSQLite(dbPath, spreadsheetID, worksheetCredentialsPath, fossaToken
 		return nil, fmt.Errorf("bootstrap: failed to load FOSSA projects: %w", err)
 	}
 
-	log.Printf("bootstrap: completed and loaded seed data into %s", dbPath)
+	log.Printf("bootstrap: completed and loaded seed data (driver=%s)", driver)
 	return db, nil
+}
+
+// BootstrapSQLite is kept for backwards compatibility.
+func BootstrapSQLite(dbPath, spreadsheetID, worksheetCredentialsPath, fossaToken string, seed bool) (*gorm.DB, error) {
+	return BootstrapDB("sqlite", dbPath, spreadsheetID, worksheetCredentialsPath, fossaToken, seed)
 }
 
 // Reads data from spreadsheetID inserts it into db.

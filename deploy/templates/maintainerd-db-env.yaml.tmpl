@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: maintainerd-db-env
+  namespace: maintainerd
+type: Opaque
+stringData:
+  MD_DB_DRIVER: ${MD_DB_DRIVER}
+  MD_DB_DSN: ${MD_DB_DSN}

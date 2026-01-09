@@ -1,0 +1,3 @@
+creation_rules:
+  - path_regex: deploy/secrets/.*\.yaml$
+    age: age13ky20ttewhjkjncjkj3xk4ngah6luurk7xu83p6w7f9z4r49js9qk2t3w0

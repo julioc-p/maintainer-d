@@ -7,30 +7,28 @@ MaintainerD - input data (List of Projects and associated Maintainers)
 graph RL
     subgraph maintainerd["Namespace: maintainerd"]
         subgraph pod["Pod"]
-            subgraph initContainerBootstrap["initContainer: bootstrap"]
-                bootstrap["Loads Project → Maintainer data <br>into sqlite3 database<br>from CNCF-Internal Google Sheet"]
-            end
             subgraph maintainerdServer["maintainerd-server"]
                 server["<br>GitHub WebHooks<br>labels can start on-boarding processes<br>issue comments can progress workflows<br>/healthz establishes availability by maintainerd-service."]
             end
         end
 
-        pvc[(PersistentVolumeClaim<br/>sqlite3 maintainerd-db)]
+        job["Job: maintainerd-bootstrap<br/>Seeds data from CNCF Google Sheet"]
+        pg[(Managed Postgres)]
         svc{{Service<br/>maintainerd-service<br/>type=LoadBalancer}}
         svc -->|"ports 80/443"| ext[(External LB IP<br/>github-events.cncf.io/webhook)]
     end
 
-    bootstrap -->|"SQL INSERTs into PROJECT and MAINTAINERS tables"| pvc
+    job -->|"SQL INSERTs into PROJECT and MAINTAINERS tables"| pg
 ```
 
 
     deploy -->|creates| pod
-    deploy -->|mounts| pvc
+    deploy -->|connects| pg
     deploy -->|envFrom| secrets
     deploy -->|imagePullSecrets| ghcr
     pod -->|exposes 2525| svc
     svc -->|TLS| tls
-    pod -->|volumeMount| pvc
+    job -->|envFrom| secrets
 
 
 
@@ -155,8 +153,8 @@ TEXT name
 
 
 
-## init-container
- - bootstrap process loads project and maintainer data from 
+## bootstrap job
+ - bootstrap process loads project and maintainer data into Postgres from 
    - a CNCF-Internal worksheet 
    - in future, should be loaded from a combination of PCC user profiles (keyed by GitHub user account) and a registered list of project.yaml files on a per-project basis. 
 

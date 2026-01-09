@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: maintainerd-github-events
+  namespace: maintainerd
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-http
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - github-events.cncf.io
+      secretName: maintainerd-tls
+  rules:
+    - host: github-events.cncf.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: maintainerd-service
+                port:
+                  number: 80

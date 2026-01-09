@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maintainerd-web
+  labels:
+    app: maintainerd-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: maintainerd-web
+  template:
+    metadata:
+      labels:
+        app: maintainerd-web
+    spec:
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: web
+          image: ghcr.io/robertkielty/maintainerd-web:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - secretRef:
+                name: maintainerd-web-env

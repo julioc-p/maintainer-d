@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+.vscode
+.DS_Store
+
+**/node_modules
+**/.next
+**/dist
+**/build
+**/coverage
+
+deploy/secrets
+deploy/manifests/*.pem
+deploy/manifests/*.key

@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maintainerd-web-bff
+  labels:
+    app: maintainerd-web-bff
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: maintainerd-web-bff
+  template:
+    metadata:
+      labels:
+        app: maintainerd-web-bff
+    spec:
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: web-bff
+          image: ghcr.io/robertkielty/maintainerd-web-bff:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: maintainerd-web-bff-env
+            - secretRef:
+                name: maintainerd-db-env
