@@ -606,6 +606,10 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPatch {
+		s.handleProjectMaintainerRefUpdate(w, r)
+		return
+	}
 	id, err := parseIDParam(r.URL.Path, "/api/projects/")
 	if err != nil {
 		http.Error(w, "invalid project id", http.StatusBadRequest)
@@ -656,6 +660,9 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 	if role != roleStaff {
 		refBody = ""
 		refLines = nil
+	}
+	if refOnlyGitHub == nil {
+		refOnlyGitHub = []string{}
 	}
 
 	maintainers := summarizeMaintainerDetails(project.Maintainers, refMatches)
@@ -710,6 +717,50 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(headerContentType, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		s.logger.Printf("web-bff: handleProject encode error: %v", err)
+	}
+}
+
+type projectMaintainerRefUpdateRequest struct {
+	MaintainerRef string `json:"maintainerRef"`
+}
+
+func (s *server) handleProjectMaintainerRefUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	id, err := parseIDParam(r.URL.Path, "/api/projects/")
+	if err != nil {
+		http.Error(w, "invalid project id", http.StatusBadRequest)
+		return
+	}
+	session := sessionFromContext(r.Context())
+	if session == nil || session.Role != roleStaff {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var req projectMaintainerRefUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	ref := strings.TrimSpace(req.MaintainerRef)
+	if ref != "" && !strings.HasPrefix(ref, "http://") && !strings.HasPrefix(ref, "https://") {
+		http.Error(w, "maintainerRef must be a URL", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.UpdateProjectMaintainerRef(id, ref); err != nil {
+		if errors.Is(err, db.ErrProjectNotFound) {
+			http.Error(w, "project not found", http.StatusNotFound)
+			return
+		}
+		s.logger.Printf("web-bff: update maintainerRef failed id=%d err=%v", id, err)
+		http.Error(w, "failed to update project", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		s.logger.Printf("web-bff: handleProject update encode error: %v", err)
 	}
 }
 
@@ -913,7 +964,7 @@ func (s *server) withCORS(next http.Handler) http.Handler {
 			w.Header().Set("Vary", "Origin")
 		}
 		if r.Method == http.MethodOptions {
-			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 			w.WriteHeader(http.StatusNoContent)
 			return

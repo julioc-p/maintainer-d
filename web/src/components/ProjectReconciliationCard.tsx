@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card } from "clo-ui/components/Card";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -55,6 +55,7 @@ type ProjectReconciliationCardProps = {
   isRefreshing?: boolean;
   canEdit?: boolean;
   onAddMaintainer?: (payload: AddMaintainerPayload) => Promise<void>;
+  onUpdateMaintainerRef?: (ref: string) => Promise<void>;
 };
 
 const formatDate = (value?: string | null) => {
@@ -139,6 +140,7 @@ export default function ProjectReconciliationCard({
   isRefreshing,
   canEdit = false,
   onAddMaintainer,
+  onUpdateMaintainerRef,
 }: ProjectReconciliationCardProps) {
   const normalizedOnboardingIssue = formatValue(onboardingIssue);
   const normalizedMailingList = formatValue(mailingList);
@@ -150,8 +152,18 @@ export default function ProjectReconciliationCard({
   const refMissingCount = maintainers.length - refMatchCount;
   const refOnlyCount = refOnlyGitHub.length;
   const refLinesMap = refLines ?? {};
+  const isRefBroken = Boolean(refUrl) && refStatus !== "fetched";
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<AddMaintainerPayload | null>(null);
+  const [refInput, setRefInput] = useState("");
+  const [refSaving, setRefSaving] = useState(false);
+  const [refError, setRefError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isRefBroken && refInput.trim() === "" && refUrl) {
+      setRefInput(refUrl);
+    }
+  }, [isRefBroken, refInput, refUrl]);
 
   return (
     <Card hoverable={false} className={styles.card}>
@@ -265,8 +277,106 @@ export default function ProjectReconciliationCard({
               </h2>
             </div>
 
-
             <div className={styles.section}>
+              {!refUrl && canEdit && onUpdateMaintainerRef ? (
+                <div className={styles.refMissing}>
+                  <div className={styles.refMissingText}>
+                    No project admin file is registered for this project.
+                  </div>
+                  <div className={styles.refInputRow}>
+                    <input
+                      className={styles.refInput}
+                      type="url"
+                      placeholder="https://github.com/org/repo/blob/main/MAINTAINERS.md"
+                      value={refInput}
+                      onChange={(event) => {
+                        setRefInput(event.target.value);
+                        setRefError(null);
+                      }}
+                    />
+                    <button
+                      className={styles.refSaveButton}
+                      type="button"
+                      disabled={refSaving || refInput.trim() === ""}
+                      onClick={async () => {
+                        if (!onUpdateMaintainerRef) {
+                          return;
+                        }
+                        const next = refInput.trim();
+                        if (!next) {
+                          setRefError("Enter a URL for the project admin file.");
+                          return;
+                        }
+                        setRefSaving(true);
+                        setRefError(null);
+                        try {
+                          await onUpdateMaintainerRef(next);
+                          setRefInput("");
+                          if (onRefresh) {
+                            onRefresh();
+                          }
+                        } catch (err) {
+                          setRefError("Unable to update project admin file.");
+                        } finally {
+                          setRefSaving(false);
+                        }
+                      }}
+                    >
+                      {refSaving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                  {refError ? <div className={styles.refError}>{refError}</div> : null}
+                </div>
+              ) : null}
+              {isRefBroken && canEdit && onUpdateMaintainerRef ? (
+                <div className={styles.refMissing}>
+                  <div className={styles.refMissingText}>
+                    The project admin file could not be loaded. Update the URL below.
+                  </div>
+                  <div className={styles.refInputRow}>
+                    <input
+                      className={styles.refInput}
+                      type="url"
+                      placeholder="https://github.com/org/repo/blob/main/MAINTAINERS.md"
+                      value={refInput}
+                      onChange={(event) => {
+                        setRefInput(event.target.value);
+                        setRefError(null);
+                      }}
+                    />
+                    <button
+                      className={styles.refSaveButton}
+                      type="button"
+                      disabled={refSaving || refInput.trim() === ""}
+                      onClick={async () => {
+                        if (!onUpdateMaintainerRef) {
+                          return;
+                        }
+                        const next = refInput.trim();
+                        if (!next) {
+                          setRefError("Enter a URL for the project admin file.");
+                          return;
+                        }
+                        setRefSaving(true);
+                        setRefError(null);
+                        try {
+                          await onUpdateMaintainerRef(next);
+                          if (onRefresh) {
+                            onRefresh();
+                          }
+                        } catch (err) {
+                          setRefError("Unable to update project admin file.");
+                        } finally {
+                          setRefSaving(false);
+                        }
+                      }}
+                    >
+                      {refSaving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                  {refError ? <div className={styles.refError}>{refError}</div> : null}
+                </div>
+              ) : null}
               {refBody ? (
                 <div className={styles.refMarkdown}>
                   <ReactMarkdown

@@ -238,6 +238,57 @@
   overflow: auto;
 }
 
+.refMissing {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: #fff7e6;
+  border: 1px solid #f4d08a;
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.refMissingText {
+  color: #6d4d00;
+  font-size: 0.95rem;
+}
+
+.refInputRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.refInput {
+  flex: 1;
+  min-width: 220px;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #d4b46b;
+  background: #fff;
+  font-size: 0.95rem;
+}
+
+.refSaveButton {
+  border: none;
+  border-radius: 8px;
+  background: #1f3a75;
+  color: #fff;
+  padding: 0.55rem 1rem;
+  font-weight: 600;
+}
+
+.refSaveButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.refError {
+  color: #a12a2a;
+  font-size: 0.9rem;
+}
+
 .refMarkdown h1,
 .refMarkdown h2,
 .refMarkdown h3 {

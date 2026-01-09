@@ -71,6 +71,19 @@ func (s *SQLStore) GetProjectByID(projectID uint) (*model.Project, error) {
 	return &project, nil
 }
 
+func (s *SQLStore) UpdateProjectMaintainerRef(projectID uint, ref string) error {
+	result := s.db.Model(&model.Project{}).
+		Where("id = ?", projectID).
+		Update("maintainer_ref", ref)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrProjectNotFound
+	}
+	return nil
+}
+
 func (s *SQLStore) CreateMaintainer(projectID uint, name, email, githubHandle, company string) (*model.Maintainer, error) {
 	tx := s.db.Begin()
 	if tx.Error != nil {
