@@ -35,7 +35,7 @@
 
 .resultsCount {
   font-size: 14px;
-  color: rgba(15, 23, 42, 0.75);
+  color: var(--md-card-text, #0f172a);
 }
 
 .controls {
@@ -49,18 +49,34 @@
   align-items: center;
   gap: 6px;
   font-size: 13px;
+  color: var(--md-card-text, #0f172a);
 }
 
 .showSelect select {
   border-radius: 6px;
   padding: 4px 6px;
+  background: var(--md-card-bg, #ffffff);
+  color: var(--md-card-text, #0f172a);
+  border: 1px solid var(--md-border-strong, rgba(15, 23, 42, 0.2));
+}
+
+[data-theme="dark"] .navSearch :global(input),
+[data-theme="dark"] .navSearch :global(.form-control),
+[data-theme="dark"] .navSearch :global(.form-input),
+[data-theme="dark"] .navSearch :global(.form-control-sm) {
+  color: var(--md-card-text, #e6e8ee);
+}
+
+[data-theme="dark"] .navSearch :global(input::placeholder) {
+  color: var(--md-card-muted, rgba(230, 232, 238, 0.7));
 }
 
 .statusBanner {
   padding: 10px 14px;
   border-radius: 10px;
-  background: rgba(15, 23, 42, 0.08);
+  background: var(--md-surface-strong, rgba(15, 23, 42, 0.08));
   font-size: 13px;
+  color: var(--md-card-text, #0f172a);
 }
 
 .searchbarWrapper {
@@ -75,15 +91,17 @@
 }
 
 .sidebar {
-  background: #ffffff;
+  background: var(--md-surface-strong, rgba(15, 23, 42, 0.08));
   border-radius: 16px;
   padding: 18px;
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--md-shadow, 0 10px 20px rgba(0, 0, 0, 0.06));
+  border: 1px solid var(--md-border, rgba(15, 23, 42, 0.08));
 }
 
 .filtersHeader {
   font-weight: 600;
   margin-bottom: 12px;
+  color: var(--md-card-text-strong, #0b1220);
 }
 
 .content {
