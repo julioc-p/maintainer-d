@@ -77,11 +77,11 @@
 }
 
 .dropdownMenu {
-  background: #ffffff;
+  background: var(--md-card-bg);
   border-radius: 12px;
   padding: 8px;
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.16);
-  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: var(--md-shadow);
+  border: 1px solid var(--md-border);
   min-width: 160px;
 }
 
@@ -102,7 +102,7 @@
 }
 
 .dropdownItem:hover {
-  background: rgba(15, 23, 42, 0.08);
+  background: var(--md-surface-strong);
 }
 
 .loginButton {

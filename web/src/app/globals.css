@@ -4,6 +4,42 @@ body {
   overflow-x: hidden;
 }
 
+:root {
+  --md-card-bg: #ffffff;
+  --md-card-text: #0f172a;
+  --md-card-text-strong: #0b1220;
+  --md-card-muted: rgba(15, 23, 42, 0.6);
+  --md-card-subtle: rgba(15, 23, 42, 0.45);
+  --md-border: rgba(15, 23, 42, 0.08);
+  --md-border-strong: rgba(15, 23, 42, 0.2);
+  --md-surface: rgba(15, 23, 42, 0.04);
+  --md-surface-strong: rgba(15, 23, 42, 0.08);
+  --md-chip-bg: rgba(15, 23, 42, 0.12);
+  --md-chip-text: #0b1220;
+  --md-link: #0b3d2e;
+  --md-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
+  --md-modal-backdrop: rgba(15, 23, 42, 0.45);
+  --md-modal-shadow: 0 20px 40px rgba(15, 23, 42, 0.2);
+}
+
+[data-theme="dark"] {
+  --md-card-bg: #1d2025;
+  --md-card-text: #e6e8ee;
+  --md-card-text-strong: #f2f4f8;
+  --md-card-muted: rgba(230, 232, 238, 0.7);
+  --md-card-subtle: rgba(230, 232, 238, 0.55);
+  --md-border: rgba(255, 255, 255, 0.08);
+  --md-border-strong: rgba(255, 255, 255, 0.18);
+  --md-surface: rgba(255, 255, 255, 0.05);
+  --md-surface-strong: rgba(255, 255, 255, 0.1);
+  --md-chip-bg: rgba(255, 255, 255, 0.14);
+  --md-chip-text: #f2f4f8;
+  --md-link: #7ee0b2;
+  --md-shadow: 0 12px 24px rgba(0, 0, 0, 0.45);
+  --md-modal-backdrop: rgba(10, 12, 16, 0.7);
+  --md-modal-shadow: 0 24px 48px rgba(0, 0, 0, 0.6);
+}
+
 body {
   color: var(--color-font);
   background: var(--body-bg);
