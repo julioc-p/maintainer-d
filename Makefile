@@ -749,6 +749,9 @@ ci-local:
 	@echo "→ Running golangci-lint..."
 	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint not installed. Run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; exit 1; }
 	@golangci-lint run ./...
+	@echo "→ Running web eslint..."
+	@rm -rf web/work/testdata/next-dist web/testdata/next-dist web/tmp || true
+	@npm --prefix web run lint -- --max-warnings=0
 	@echo "→ Running tests with race detector..."
 	@go test -race -coverprofile=coverage.out -covermode=atomic ./...
 	@echo "→ Coverage report:"

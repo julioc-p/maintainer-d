@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Local scratch / generated artifacts:
+    "tmp/**",
+    "work/testdata/next-dist/**",
+    "testdata/next-dist/**",
+    "**/next-dist/**",
   ]),
 ]);
 

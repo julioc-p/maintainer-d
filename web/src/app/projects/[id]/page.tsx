@@ -13,6 +13,8 @@ type MaintainerSummary = {
   name: string;
   github: string;
   inMaintainerRef: boolean;
+  status?: string;
+  company?: string;
 };
 
 type ServiceSummary = {
@@ -80,7 +82,9 @@ const projectDataHasChanged = (
       currentMaintainer.id !== nextMaintainer.id ||
       currentMaintainer.name !== nextMaintainer.name ||
       currentMaintainer.github !== nextMaintainer.github ||
-      currentMaintainer.inMaintainerRef !== nextMaintainer.inMaintainerRef
+      currentMaintainer.inMaintainerRef !== nextMaintainer.inMaintainerRef ||
+      currentMaintainer.status !== nextMaintainer.status ||
+      currentMaintainer.company !== nextMaintainer.company
     ) {
       return true;
     }
@@ -348,6 +352,15 @@ export default function ProjectPage() {
                   setError("Unable to add maintainer");
                   return;
                 }
+                await handleRefresh();
+              }}
+              onBulkStatusChange={async (ids, status) => {
+                await fetch(`${apiBaseUrl}/maintainers/status`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  body: JSON.stringify({ ids, status }),
+                });
                 await handleRefresh();
               }}
             />

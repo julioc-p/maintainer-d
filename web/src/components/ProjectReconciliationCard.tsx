@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card } from "clo-ui/components/Card";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -15,6 +15,8 @@ type MaintainerSummary = {
   name: string;
   github: string;
   inMaintainerRef: boolean;
+  status?: string;
+  company?: string;
 };
 
 type ServiceSummary = {
@@ -56,6 +58,7 @@ type ProjectReconciliationCardProps = {
   canEdit?: boolean;
   onAddMaintainer?: (payload: AddMaintainerPayload) => Promise<void>;
   onUpdateMaintainerRef?: (ref: string) => Promise<void>;
+  onBulkStatusChange?: (ids: number[], status: string) => Promise<void>;
 };
 
 const formatDate = (value?: string | null) => {
@@ -141,6 +144,7 @@ export default function ProjectReconciliationCard({
   canEdit = false,
   onAddMaintainer,
   onUpdateMaintainerRef,
+  onBulkStatusChange,
 }: ProjectReconciliationCardProps) {
   const normalizedOnboardingIssue = formatValue(onboardingIssue);
   const normalizedMailingList = formatValue(mailingList);
@@ -152,6 +156,177 @@ export default function ProjectReconciliationCard({
   const refMissingCount = maintainers.length - refMatchCount;
   const refOnlyCount = refOnlyGitHub.length;
   const refLinesMap = refLines ?? {};
+  const normalizedRefLines = useMemo(() => {
+    const entries = Object.entries(refLinesMap || {}).map(([key, value]) => [key.toLowerCase(), value]);
+    return Object.fromEntries(entries) as Record<string, string>;
+  }, [refLinesMap]);
+
+  const [selectedMaintainers, setSelectedMaintainers] = useState<Set<number>>(new Set());
+  const toggleSelected = (id: number) => {
+    setSelectedMaintainers((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedMaintainers(new Set());
+
+  const groupedMaintainers = useMemo(() => {
+    const order = ["active", "archived", "emeritus", "retired"];
+    const labels: Record<string, string> = {
+      active: "Active",
+      archived: "Archived",
+      emeritus: "Emeritus",
+      retired: "Retired",
+    };
+    const groups: { key: string; label: string; items: MaintainerSummary[] }[] = order.map((k) => ({
+      key: k,
+      label: labels[k],
+      items: [],
+    }));
+    const bucket: Record<string, MaintainerSummary[]> = {};
+    for (const m of maintainers) {
+      const key = (m.status || "").toLowerCase();
+      bucket[key] = bucket[key] || [];
+      bucket[key].push(m);
+    }
+    return groups
+      .map((g) => ({
+        ...g,
+        items: bucket[g.key] || [],
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [maintainers]);
+
+  const renderMaintainerGroups = () => (
+    <div className={styles.groupStack}>
+      {groupedMaintainers.map((group) => (
+        <div key={group.key} className={styles.group}>
+          <div className={styles.groupHeader}>{group.label}</div>
+          {group.items.length > 1 ? (
+            <label className={styles.selectAll}>
+              <input
+                type="checkbox"
+                checked={group.items.every((m) => selectedMaintainers.has(m.id))}
+                onChange={(e) => {
+                  const allSelected = e.target.checked;
+                  setSelectedMaintainers((prev) => {
+                    const next = new Set(prev);
+                    if (allSelected) {
+                      group.items.forEach((m) => next.add(m.id));
+                    } else {
+                      group.items.forEach((m) => next.delete(m.id));
+                    }
+                    return next;
+                  });
+                }}
+              />
+              Select all
+            </label>
+          ) : null}
+          <ul className={styles.list}>
+            {group.items.map((maintainer) => {
+              const status = (maintainer.status || "").toLowerCase();
+              let statusClass = styles.statusMuted;
+              if (status === "active") statusClass = styles.statusOk;
+              else if (status === "emeritus") statusClass = styles.statusEmeritus;
+              else if (status === "retired") statusClass = styles.statusRetired;
+              else if (status === "archived") statusClass = styles.statusArchived;
+
+              const checked = selectedMaintainers.has(maintainer.id);
+
+              return (
+                <li key={maintainer.id} className={styles.listItem}>
+                  <div className={styles.listRow}>
+                    <input
+                      type="checkbox"
+                      className={styles.checkbox}
+                      checked={checked}
+                      onChange={() => toggleSelected(maintainer.id)}
+                    />
+                    <a className={styles.link} href={`/maintainers/${maintainer.id}`}>
+                      {maintainer.name || maintainer.github || "Unknown maintainer"}
+                    </a>
+                    {maintainer.github ? <span className={styles.secondary}>@{maintainer.github}</span> : null}
+                    {maintainer.company ? <span className={styles.secondary}>{maintainer.company}</span> : null}
+                    <span className={`${styles.statusBadge} ${statusClass}`}>
+                      {maintainer.status ? maintainer.status : "Status Unknown"}
+                    </span>
+                    {refStatus === "fetched" ? (
+                      <span
+                        className={`${styles.statusBadge} ${
+                          maintainer.inMaintainerRef ? styles.statusOk : styles.statusWarn
+                        }`}
+                      >
+                        {maintainer.inMaintainerRef ? "In GitHub" : "Missing On GitHub"}
+                      </span>
+                    ) : (
+                      <span className={`${styles.statusBadge} ${styles.statusMuted}`}>Not checked</span>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+      <div className={styles.bulkActions}>
+        <span className={styles.secondary}>
+          {selectedMaintainers.size > 0 ? `${selectedMaintainers.size} selected` : "No maintainers selected"}
+        </span>
+        <div className={styles.bulkButtons}>
+          <button
+            type="button"
+            className={styles.bulkButton}
+            disabled={selectedMaintainers.size === 0}
+            onClick={() => updateMaintainerStatuses("Active")}
+          >
+            Activate
+          </button>
+          <button
+            type="button"
+            className={styles.bulkButton}
+            disabled={selectedMaintainers.size === 0}
+            onClick={() => updateMaintainerStatuses("Emeritus")}
+          >
+            Emeritus
+          </button>
+          <button
+            type="button"
+            className={styles.bulkButton}
+            disabled={selectedMaintainers.size === 0}
+            onClick={() => updateMaintainerStatuses("Retired")}
+          >
+            Retire
+          </button>
+          <button
+            type="button"
+            className={`${styles.bulkButton} ${styles.bulkDanger}`}
+            disabled={selectedMaintainers.size === 0}
+            onClick={() => updateMaintainerStatuses("Archived")}
+          >
+            Archive
+          </button>
+          <button type="button" className={styles.bulkClear} onClick={clearSelection}>
+            Clear
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const updateMaintainerStatuses = async (status: string) => {
+    if (!onBulkStatusChange) return;
+    const ids = Array.from(selectedMaintainers);
+    if (ids.length === 0) return;
+    await onBulkStatusChange(ids, status);
+    clearSelection();
+  };
   const isRefBroken = Boolean(refUrl) && refStatus !== "fetched";
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<AddMaintainerPayload | null>(null);
@@ -160,7 +335,6 @@ export default function ProjectReconciliationCard({
   const [refError, setRefError] = useState<string | null>(null);
   const [legacyOpen, setLegacyOpen] = useState(true);
   const [activeSection, setActiveSection] = useState<string>("legacy");
-
   useEffect(() => {
     if (isRefBroken && refInput.trim() === "" && refUrl) {
       setRefInput(refUrl);
@@ -227,27 +401,7 @@ export default function ProjectReconciliationCard({
           {maintainers.length === 0 ? (
             <div className={styles.empty}>No maintainers found.</div>
           ) : (
-            <ul className={styles.list}>
-              {maintainers.map((maintainer) => (
-                <li key={maintainer.id} className={styles.listItem}>
-                  <div className={styles.listRow}>
-                    <a className={styles.link} href={`/maintainers/${maintainer.id}`}>
-                      {maintainer.name || maintainer.github || "Unknown maintainer"}
-                    </a>
-                    {maintainer.github ? <span className={styles.secondary}>@{maintainer.github}</span> : null}
-                    {maintainer.company ? <span className={styles.secondary}>@{maintainer.company}</span> : null}
-                    {refStatus === "fetched" ? (
-                      <span className={`${styles.statusBadge} ${maintainer.inMaintainerRef ? styles.statusOk : styles.statusWarn}`} >
-                        {maintainer.inMaintainerRef ? "In GitHub" : "Missing On GitHub"}
-                      </span>
-                    ) : (
-                      <span className={`${styles.statusBadge} ${styles.statusMuted}`}>Not checked</span>
-                    )}
-                  </div>
-                  
-                </li>
-              ))}
-            </ul>
+            renderMaintainerGroups()
           )}
         </div>
       </div>
@@ -401,7 +555,7 @@ export default function ProjectReconciliationCard({
                             email: "",
                             company: "",
                             companyMode: "select",
-                            refLine: refLinesMap[handle] || "",
+                            refLine: normalizedRefLines[handle.toLowerCase()] || "",
                           });
                           setModalOpen(true);
                         }}
@@ -532,13 +686,8 @@ export default function ProjectReconciliationCard({
             <div className={styles.nestedCard}>
               <div className={styles.collapsibleHeader}>
                 <h2 className={styles.sectionTitle}>{menuItems.find((m) => m.id === activeSection)?.label}</h2>
-                {activeSection === "legacy" ? (
-                  <button className={styles.collapseToggle} type="button" onClick={() => setLegacyOpen((v) => !v)}>
-                    {legacyOpen ? "Hide" : "Show"}
-                  </button>
-                ) : null}
               </div>
-              {activeSection === "legacy" ? (legacyOpen ? renderContent() : null) : renderContent()}
+              {renderContent()}
             </div>
           </div>
         </div>

@@ -229,6 +229,7 @@ func main() {
 	mux.Handle("/api/me", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMe))))
 	mux.Handle("/api/projects", s.withCORS(s.requireSession(http.HandlerFunc(s.handleProjects))))
 	mux.Handle("/api/projects/", s.withCORS(s.requireSession(http.HandlerFunc(s.handleProject))))
+	mux.Handle("/api/maintainers/status", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMaintainerStatusUpdate))))
 	mux.Handle("/api/maintainers/from-ref", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMaintainerFromRef))))
 	mux.Handle("/api/maintainers/", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMaintainer))))
 	mux.Handle("/api/companies", s.withCORS(s.requireSession(http.HandlerFunc(s.handleCompanies))))
@@ -473,6 +474,8 @@ type projectMaintainerDetail struct {
 	Name            string `json:"name"`
 	GitHub          string `json:"github"`
 	InMaintainerRef bool   `json:"inMaintainerRef"`
+	Status          string `json:"status"`
+	Company         string `json:"company,omitempty"`
 }
 
 type serviceSummary struct {
@@ -821,6 +824,53 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(headerContentType, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		s.logger.Printf("web-bff: handleMaintainer encode error: %v", err)
+	}
+}
+
+type maintainerStatusUpdateRequest struct {
+	IDs    []uint `json:"ids"`
+	Status string `json:"status"`
+}
+
+func (s *server) handleMaintainerStatusUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	session := sessionFromContext(r.Context())
+	if session == nil || session.Role != roleStaff {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	var req maintainerStatusUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if len(req.IDs) == 0 {
+		http.Error(w, "no maintainer ids provided", http.StatusBadRequest)
+		return
+	}
+	status := model.MaintainerStatus(strings.TrimSpace(req.Status))
+	if !status.IsValid() {
+		http.Error(w, "invalid status", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.UpdateMaintainersStatus(req.IDs, status); err != nil {
+		s.logger.Printf("web-bff: maintainer status update failed ids=%v status=%s err=%v", req.IDs, status, err)
+		http.Error(w, "failed to update maintainers", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		s.logger.Printf("web-bff: handleMaintainerStatusUpdate encode error: %v", err)
 	}
 }
 
@@ -1265,6 +1315,8 @@ func summarizeMaintainerDetails(maintainers []model.Maintainer, refMatches map[u
 			Name:            name,
 			GitHub:          github,
 			InMaintainerRef: refMatches[maintainer.ID],
+			Status:          string(maintainer.MaintainerStatus),
+			Company:         strings.TrimSpace(maintainer.Company.Name),
 		})
 	}
 	return result

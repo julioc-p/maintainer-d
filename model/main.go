@@ -15,12 +15,13 @@ const (
 	ActiveMaintainer   MaintainerStatus = "Active"
 	EmeritusMaintainer MaintainerStatus = "Emeritus"
 	RetiredMaintainer  MaintainerStatus = "Retired"
+	ArchivedMaintainer MaintainerStatus = "Archived"
 )
 
 // IsValid returns true id MaintainerStatus is known
 func (s MaintainerStatus) IsValid() bool {
 	switch s {
-	case ActiveMaintainer, EmeritusMaintainer, RetiredMaintainer:
+	case ActiveMaintainer, EmeritusMaintainer, RetiredMaintainer, ArchivedMaintainer:
 		return true
 	}
 	return false

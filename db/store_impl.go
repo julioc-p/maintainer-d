@@ -60,6 +60,7 @@ func (s *SQLStore) GetProjectByID(projectID uint) (*model.Project, error) {
 	var project model.Project
 	err := s.db.
 		Preload("Maintainers").
+		Preload("Maintainers.Company").
 		Preload("Services").
 		First(&project, projectID).Error
 	if err != nil {
@@ -69,6 +70,13 @@ func (s *SQLStore) GetProjectByID(projectID uint) (*model.Project, error) {
 		return nil, err
 	}
 	return &project, nil
+}
+
+// ListProjectsWithMaintainers returns all projects with maintainer associations preloaded.
+func (s *SQLStore) ListProjectsWithMaintainers() ([]model.Project, error) {
+	var projects []model.Project
+	err := s.db.Preload("Maintainers").Preload("Maintainers.Company").Find(&projects).Error
+	return projects, err
 }
 
 func (s *SQLStore) UpdateProjectMaintainerRef(projectID uint, ref string) error {
@@ -207,6 +215,36 @@ func (s *SQLStore) GetMaintainersByProject(projectID uint) ([]model.Maintainer, 
 	}
 	return project.Maintainers, nil
 
+}
+
+// UpdateMaintainerStatus updates the MaintainerStatus for a given maintainer.
+func (s *SQLStore) UpdateMaintainerStatus(maintainerID uint, status model.MaintainerStatus) error {
+	if !status.IsValid() {
+		return fmt.Errorf("invalid maintainer status %q", status)
+	}
+	result := s.db.Model(&model.Maintainer{}).
+		Where("id = ?", maintainerID).
+		Update("maintainer_status", status)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// UpdateMaintainersStatus updates multiple maintainers to the given status.
+func (s *SQLStore) UpdateMaintainersStatus(ids []uint, status model.MaintainerStatus) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if !status.IsValid() {
+		return fmt.Errorf("invalid maintainer status %q", status)
+	}
+	return s.db.Model(&model.Maintainer{}).
+		Where("id IN ?", ids).
+		Update("maintainer_status", status).Error
 }
 
 func (s *SQLStore) GetServiceTeamByProject(projectID, serviceID uint) (*model.ServiceTeam, error) {
