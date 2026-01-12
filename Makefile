@@ -9,6 +9,10 @@ IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd:$(TAG)
 IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd:latest
 SYNC_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-sync:$(TAG)
 SYNC_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-sync:latest
+SANITIZE_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-sanitize:$(TAG)
+SANITIZE_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-sanitize:latest
+MIGRATE_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-migrate:$(TAG)
+MIGRATE_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-migrate:latest
 WEB_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web:$(TAG)
 WEB_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web:latest
 WEB_BFF_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web-bff:$(TAG)
@@ -55,6 +59,16 @@ mntrd-image-build:
 sync-image-build:
 	@echo "Building sync image: $(SYNC_IMAGE)"
 	@$(CONTAINER_TOOL) build -t $(SYNC_IMAGE) -f Dockerfile --target sync .
+
+.PHONY: sanitize-image-build
+sanitize-image-build:
+	@echo "Building sanitize image: $(SANITIZE_IMAGE)"
+	@$(CONTAINER_TOOL) build -t $(SANITIZE_IMAGE) -f Dockerfile --target sanitize .
+
+.PHONY: migrate-image-build
+migrate-image-build:
+	@echo "Building migrate image: $(MIGRATE_IMAGE)"
+	@$(CONTAINER_TOOL) build -t $(MIGRATE_IMAGE) -f Dockerfile --target migrate .
 
 .PHONY: web-image-build
 web-image-build:
@@ -114,6 +128,36 @@ sync-image-push: sync-image-build
 	@echo "Tagging and pushing latest: $(SYNC_IMAGE_LATEST)"
 	@$(CONTAINER_TOOL) tag $(SYNC_IMAGE) $(SYNC_IMAGE_LATEST)
 	@$(CONTAINER_TOOL) push $(SYNC_IMAGE_LATEST)
+
+.PHONY: sanitize-image-push
+sanitize-image-push: sanitize-image-build
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@if [ -n "$(GHCR_TOKEN)" ]; then \
+		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+	else \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
+	fi
+	@echo "Pushing image: $(SANITIZE_IMAGE)"
+	@$(CONTAINER_TOOL) push $(SANITIZE_IMAGE)
+	@echo "Tagging and pushing latest: $(SANITIZE_IMAGE_LATEST)"
+	@$(CONTAINER_TOOL) tag $(SANITIZE_IMAGE) $(SANITIZE_IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(SANITIZE_IMAGE_LATEST)
+
+.PHONY: migrate-image-push
+migrate-image-push: migrate-image-build
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@if [ -n "$(GHCR_TOKEN)" ]; then \
+		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+	else \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
+	fi
+	@echo "Pushing image: $(MIGRATE_IMAGE)"
+	@$(CONTAINER_TOOL) push $(MIGRATE_IMAGE)
+	@echo "Tagging and pushing latest: $(MIGRATE_IMAGE_LATEST)"
+	@$(CONTAINER_TOOL) tag $(MIGRATE_IMAGE) $(MIGRATE_IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(MIGRATE_IMAGE_LATEST)
 
 .PHONY: web-image-push
 web-image-push: web-image-build

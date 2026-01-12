@@ -97,6 +97,17 @@ type Maintainer struct {
 	CompanyID        *uint
 	Company          Company
 }
+
+// MaintainerRefCache stores fetch metadata for a project's maintainer reference file.
+type MaintainerRefCache struct {
+	ProjectID    uint   `gorm:"primaryKey"`
+	ETag         string `gorm:"size:255"`
+	LastModified *time.Time
+	BodyHash     string `gorm:"size:128"` // sha256 hex
+	LastChecked  *time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
 type Collaborator struct {
 	gorm.Model
 	Name          string

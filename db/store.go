@@ -30,4 +30,6 @@ type Store interface {
 	UpdateMaintainerGitHubEmail(maintainerID uint, githubEmail string) error
 	ListCompanies() ([]model.Company, error)
 	ListStaffMembers() ([]model.StaffMember, error)
+	GetMaintainerRefCache(projectID uint) (*model.MaintainerRefCache, error)
+	UpsertMaintainerRefCache(cache *model.MaintainerRefCache) error
 }

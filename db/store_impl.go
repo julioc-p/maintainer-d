@@ -258,6 +258,27 @@ func (s *SQLStore) GetServiceTeamByProject(projectID, serviceID uint) (*model.Se
 	return &st, err
 }
 
+// GetMaintainerRefCache returns the cached metadata for a project's maintainer ref, or nil if none.
+func (s *SQLStore) GetMaintainerRefCache(projectID uint) (*model.MaintainerRefCache, error) {
+	var cache model.MaintainerRefCache
+	err := s.db.Where("project_id = ?", projectID).First(&cache).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &cache, nil
+}
+
+// UpsertMaintainerRefCache inserts or updates maintainer ref cache metadata.
+func (s *SQLStore) UpsertMaintainerRefCache(cache *model.MaintainerRefCache) error {
+	if cache == nil {
+		return nil
+	}
+	return s.db.Save(cache).Error
+}
+
 // GetMaintainerMapByEmail returns a map of Maintainers keyed by email address
 func (s *SQLStore) GetMaintainerMapByEmail() (map[string]model.Maintainer, error) {
 	var maintainers []model.Maintainer
