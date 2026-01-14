@@ -31,8 +31,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cncf/maintainer-d/kdp-workspaces/internal/kcp"
@@ -285,8 +287,61 @@ func (r *StaffMemberReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}}
 	}
 
+	// Create predicate to ignore annotation-only updates to prevent reconciliation loops
+	ignoreSyncAnnotations := predicate.Funcs{
+		UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+			// Get old and new annotations
+			oldAnnotations := e.ObjectOld.GetAnnotations()
+			newAnnotations := e.ObjectNew.GetAnnotations()
+
+			// Create copies without our sync annotations
+			oldFiltered := make(map[string]string)
+			newFiltered := make(map[string]string)
+
+			for k, v := range oldAnnotations {
+				if k != AnnotationStaffLastSynced &&
+					k != AnnotationStaffSyncStatus &&
+					k != AnnotationStaffWorkspaceCount {
+					oldFiltered[k] = v
+				}
+			}
+
+			for k, v := range newAnnotations {
+				if k != AnnotationStaffLastSynced &&
+					k != AnnotationStaffSyncStatus &&
+					k != AnnotationStaffWorkspaceCount {
+					newFiltered[k] = v
+				}
+			}
+
+			// Check if anything besides sync annotations changed
+			// Compare filtered annotations
+			if len(oldFiltered) != len(newFiltered) {
+				return true
+			}
+			for k, v := range oldFiltered {
+				if newFiltered[k] != v {
+					return true
+				}
+			}
+
+			// Check if spec changed (only primaryEmail matters for us)
+			oldSpec, _ := e.ObjectOld.(*metav1.PartialObjectMetadata)
+			newSpec, _ := e.ObjectNew.(*metav1.PartialObjectMetadata)
+
+			// If generation changed, spec was modified
+			if oldSpec != nil && newSpec != nil && oldSpec.Generation != newSpec.Generation {
+				return true
+			}
+
+			// Only sync annotations changed, ignore this update
+			return false
+		},
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(staffMember).
+		WithEventFilter(ignoreSyncAnnotations).
 		Watches(
 			project,
 			handler.EnqueueRequestsFromMapFunc(projectToRequests),
