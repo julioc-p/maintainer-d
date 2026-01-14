@@ -25,6 +25,12 @@ type Store interface {
 	CreateMaintainer(projectID uint, name, email, githubHandle, company string) (*model.Maintainer, error)
 	CreateCompany(name string) (*model.Company, error)
 	UpdateProjectMaintainerRef(projectID uint, ref string) error
+	UpdateMaintainerStatus(maintainerID uint, status model.MaintainerStatus) error
+	UpdateMaintainersStatus(ids []uint, status model.MaintainerStatus) error
+	UpdateMaintainerGitHubEmail(maintainerID uint, githubEmail string) error
 	ListCompanies() ([]model.Company, error)
 	ListStaffMembers() ([]model.StaffMember, error)
+	GetMaintainerRefCache(projectID uint) (*model.MaintainerRefCache, error)
+	UpsertMaintainerRefCache(cache *model.MaintainerRefCache) error
+	MergeCompanies(fromID, toID uint) error
 }

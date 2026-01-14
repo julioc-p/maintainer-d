@@ -4,6 +4,7 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Dropdown } from "clo-ui/components/Dropdown";
 import { Footer } from "clo-ui/components/Footer";
 import { Navbar } from "clo-ui/components/Navbar";
+import Link from "next/link";
 import styles from "./AppShell.module.css";
 
 type AppShellProps = {
@@ -154,9 +155,9 @@ export default function AppShell({
       <Navbar navbarClassname={styles.navbar}>
         <div className={styles.navContent}>
           <div className={styles.brandWrap}>
-            <a className={styles.brand} href="/">
+            <Link className={styles.brand} href="/">
               maintainer-d
-            </a>
+            </Link>
             <div className={styles.alpha}>Alpha</div>
           </div>
           <div className={`${styles.navCenter} ${navCenterClassName ?? ""}`}>
@@ -182,12 +183,12 @@ export default function AppShell({
                 <UserMenu onLogout={handleLogout} />
               </Dropdown>
             ) : (
-              <a
+              <Link
                 className={styles.loginButton}
                 href={`${authBaseUrl}/auth/login?next=/`}
               >
                 Sign in with GitHub
-              </a>
+              </Link>
             )}
           </div>
         </div>

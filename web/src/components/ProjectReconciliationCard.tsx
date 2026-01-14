@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card } from "clo-ui/components/Card";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -15,6 +15,8 @@ type MaintainerSummary = {
   name: string;
   github: string;
   inMaintainerRef: boolean;
+  status?: string;
+  company?: string;
 };
 
 type ServiceSummary = {
@@ -56,6 +58,7 @@ type ProjectReconciliationCardProps = {
   canEdit?: boolean;
   onAddMaintainer?: (payload: AddMaintainerPayload) => Promise<void>;
   onUpdateMaintainerRef?: (ref: string) => Promise<void>;
+  onBulkStatusChange?: (ids: number[], status: string) => Promise<void>;
 };
 
 const formatDate = (value?: string | null) => {
@@ -141,6 +144,7 @@ export default function ProjectReconciliationCard({
   canEdit = false,
   onAddMaintainer,
   onUpdateMaintainerRef,
+  onBulkStatusChange,
 }: ProjectReconciliationCardProps) {
   const normalizedOnboardingIssue = formatValue(onboardingIssue);
   const normalizedMailingList = formatValue(mailingList);
@@ -152,303 +156,541 @@ export default function ProjectReconciliationCard({
   const refMissingCount = maintainers.length - refMatchCount;
   const refOnlyCount = refOnlyGitHub.length;
   const refLinesMap = refLines ?? {};
+  const normalizedRefLines = useMemo(() => {
+    const entries = Object.entries(refLinesMap || {}).map(([key, value]) => [key.toLowerCase(), value]);
+    return Object.fromEntries(entries) as Record<string, string>;
+  }, [refLinesMap]);
+
+  const [selectedMaintainers, setSelectedMaintainers] = useState<Set<number>>(new Set());
+  const toggleSelected = (id: number) => {
+    setSelectedMaintainers((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedMaintainers(new Set());
+
+  const groupedMaintainers = useMemo(() => {
+    const order = ["active", "archived", "emeritus", "retired"];
+    const labels: Record<string, string> = {
+      active: "Active",
+      archived: "Archived",
+      emeritus: "Emeritus",
+      retired: "Retired",
+    };
+    const groups: { key: string; label: string; items: MaintainerSummary[] }[] = order.map((k) => ({
+      key: k,
+      label: labels[k],
+      items: [],
+    }));
+    const bucket: Record<string, MaintainerSummary[]> = {};
+    for (const m of maintainers) {
+      const key = (m.status || "").toLowerCase();
+      bucket[key] = bucket[key] || [];
+      bucket[key].push(m);
+    }
+    return groups
+      .map((g) => ({
+        ...g,
+        items: bucket[g.key] || [],
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [maintainers]);
+
+  const renderMaintainerGroups = () => (
+    <div className={styles.groupStack}>
+      {groupedMaintainers.map((group) => (
+        <div key={group.key} className={styles.group}>
+          <div className={styles.groupHeader}>{group.label}</div>
+          {group.items.length > 1 ? (
+            <label className={styles.selectAll}>
+              <input
+                type="checkbox"
+                checked={group.items.every((m) => selectedMaintainers.has(m.id))}
+                onChange={(e) => {
+                  const allSelected = e.target.checked;
+                  setSelectedMaintainers((prev) => {
+                    const next = new Set(prev);
+                    if (allSelected) {
+                      group.items.forEach((m) => next.add(m.id));
+                    } else {
+                      group.items.forEach((m) => next.delete(m.id));
+                    }
+                    return next;
+                  });
+                }}
+              />
+              Select all
+            </label>
+          ) : null}
+          <ul className={styles.list}>
+            {group.items.map((maintainer) => {
+              const status = (maintainer.status || "").toLowerCase();
+              let statusClass = styles.statusMuted;
+              if (status === "active") statusClass = styles.statusOk;
+              else if (status === "emeritus") statusClass = styles.statusEmeritus;
+              else if (status === "retired") statusClass = styles.statusRetired;
+              else if (status === "archived") statusClass = styles.statusArchived;
+
+              const checked = selectedMaintainers.has(maintainer.id);
+
+              return (
+                <li key={maintainer.id} className={styles.listItem}>
+                  <div className={styles.listRow}>
+                    <input
+                      type="checkbox"
+                      className={styles.checkbox}
+                      checked={checked}
+                      onChange={() => toggleSelected(maintainer.id)}
+                    />
+                    <a className={styles.link} href={`/maintainers/${maintainer.id}`}>
+                      {maintainer.name || maintainer.github || "Unknown maintainer"}
+                    </a>
+                    {maintainer.github ? <span className={styles.secondary}>@{maintainer.github}</span> : null}
+                    {maintainer.company ? <span className={styles.secondary}>{maintainer.company}</span> : null}
+                    <span className={`${styles.statusBadge} ${statusClass}`}>
+                      {maintainer.status ? maintainer.status : "Status Unknown"}
+                    </span>
+                    {refStatus === "fetched" ? (
+                      <span
+                        className={`${styles.statusBadge} ${
+                          maintainer.inMaintainerRef ? styles.statusOk : styles.statusWarn
+                        }`}
+                      >
+                        {maintainer.inMaintainerRef ? "In GitHub" : "Missing On GitHub"}
+                      </span>
+                    ) : (
+                      <span className={`${styles.statusBadge} ${styles.statusMuted}`}>Not checked</span>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+      <div className={styles.bulkActions}>
+        <span className={styles.secondary}>
+          {selectedMaintainers.size > 0 ? `${selectedMaintainers.size} selected` : "No maintainers selected"}
+        </span>
+        <div className={styles.bulkButtons}>
+          <button
+            type="button"
+            className={styles.bulkButton}
+            disabled={selectedMaintainers.size === 0}
+            onClick={() => updateMaintainerStatuses("Active")}
+          >
+            Activate
+          </button>
+          <button
+            type="button"
+            className={styles.bulkButton}
+            disabled={selectedMaintainers.size === 0}
+            onClick={() => updateMaintainerStatuses("Emeritus")}
+          >
+            Emeritus
+          </button>
+          <button
+            type="button"
+            className={styles.bulkButton}
+            disabled={selectedMaintainers.size === 0}
+            onClick={() => updateMaintainerStatuses("Retired")}
+          >
+            Retire
+          </button>
+          <button
+            type="button"
+            className={`${styles.bulkButton} ${styles.bulkDanger}`}
+            disabled={selectedMaintainers.size === 0}
+            onClick={() => updateMaintainerStatuses("Archived")}
+          >
+            Archive
+          </button>
+          <button type="button" className={styles.bulkClear} onClick={clearSelection}>
+            Clear
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const updateMaintainerStatuses = async (status: string) => {
+    if (!onBulkStatusChange) return;
+    const ids = Array.from(selectedMaintainers);
+    if (ids.length === 0) return;
+    await onBulkStatusChange(ids, status);
+    clearSelection();
+  };
   const isRefBroken = Boolean(refUrl) && refStatus !== "fetched";
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<AddMaintainerPayload | null>(null);
   const [refInput, setRefInput] = useState("");
   const [refSaving, setRefSaving] = useState(false);
   const [refError, setRefError] = useState<string | null>(null);
-
+  const [legacyOpen, setLegacyOpen] = useState(true);
+  const [activeSection, setActiveSection] = useState<string>("legacy");
   useEffect(() => {
     if (isRefBroken && refInput.trim() === "" && refUrl) {
       setRefInput(refUrl);
     }
   }, [isRefBroken, refInput, refUrl]);
 
+  const projectDetails = (
+    <div className={styles.section}>
+      <h3 className={styles.subSectionTitle}>Project Details</h3>
+      <div className={styles.detailRow}>
+        <span className={styles.detailLabel}>Onboarding Issue</span>
+        {normalizedOnboardingIssue !== "—" && isLink(normalizedOnboardingIssue) ? (
+          <a className={styles.link} href={normalizedOnboardingIssue} target="_blank" rel="noreferrer">
+            {normalizedOnboardingIssue}
+          </a>
+        ) : (
+          <span>{normalizedOnboardingIssue}</span>
+        )}
+      </div>
+      <div className={styles.detailRow}>
+        <span className={styles.detailLabel}>Mailing List</span>
+        <span>{normalizedMailingList}</span>
+      </div>
+    </div>
+  );
+
+  const servicesSection = (
+    <div className={styles.section}>
+      <h3 className={styles.subSectionTitle}>Services</h3>
+      {services.length === 0 ? (
+        <div className={styles.empty}>No services found.</div>
+      ) : (
+        <ul className={styles.list}>
+          {services.map((service) => (
+            <li key={service.id} className={styles.listItem}>
+              <span>{service.name || "Unknown service"}</span>
+              {service.description ? <span className={styles.secondary}>{service.description}</span> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+
+  const dotProjectSection = (
+    <div className={styles.section}>
+      <h3 className={styles.subSectionTitle}>Proposed dot project.yaml</h3>
+      <p className={styles.stub}>
+        Coming soon: this section will combine CNCF database fields and the Project Admin File to propose a standardized{" "}
+        <code>project.yaml</code> that projects can check in for GitOps-friendly maintainer rosters, mailing lists, and
+        service metadata.
+      </p>
+    </div>
+  );
+
+  const legacyContent = (
+    <div className={styles.legacyGrid}>
+      <div className={styles.column}>
+        <div className={styles.sectionHeader}>
+          <h2 className={styles.sectionTitle}>CNCF INTERNAL</h2>
+        </div>
+
+        <div className={styles.section}>
+          {maintainers.length === 0 ? (
+            <div className={styles.empty}>No maintainers found.</div>
+          ) : (
+            renderMaintainerGroups()
+          )}
+        </div>
+      </div>
+
+      <div className={styles.column}>
+        <div className={styles.sectionHeader}>
+          <h2 className={styles.sectionTitle}>
+            {refUrl ? (
+              <a className={styles.refTitleLink} href={refUrl} target="_blank" rel="noreferrer">
+                PROJECT ADMIN FILE
+                <span className={styles.refTitleUrl}>{refUrl}</span>
+              </a>
+            ) : (
+              "PROJECT ADMIN FILE"
+            )}
+          </h2>
+        </div>
+
+        <div className={styles.section}>
+          {!refUrl && canEdit && onUpdateMaintainerRef ? (
+            <div className={styles.refMissing}>
+              <div className={styles.refMissingText}>No project admin file is registered for this project.</div>
+              <div className={styles.refInputRow}>
+                <input
+                  className={styles.refInput}
+                  type="url"
+                  placeholder="https://github.com/org/repo/blob/main/MAINTAINERS.md"
+                  value={refInput}
+                  onChange={(event) => {
+                    setRefInput(event.target.value);
+                    setRefError(null);
+                  }}
+                />
+                <button
+                  className={styles.refSaveButton}
+                  type="button"
+                  disabled={refSaving || refInput.trim() === ""}
+                  onClick={async () => {
+                    if (!onUpdateMaintainerRef) {
+                      return;
+                    }
+                    const next = refInput.trim();
+                    if (!next) {
+                      setRefError("Enter a URL for the project admin file.");
+                      return;
+                    }
+                    setRefSaving(true);
+                    setRefError(null);
+                    try {
+                      await onUpdateMaintainerRef(next);
+                      setRefInput("");
+                      if (onRefresh) {
+                        onRefresh();
+                      }
+                    } catch (err) {
+                      setRefError("Unable to update project admin file.");
+                    } finally {
+                      setRefSaving(false);
+                    }
+                  }}
+                >
+                  {refSaving ? "Saving..." : "Save"}
+                </button>
+              </div>
+              {refError ? <div className={styles.refError}>{refError}</div> : null}
+            </div>
+          ) : null}
+          {isRefBroken && canEdit && onUpdateMaintainerRef ? (
+            <div className={styles.refMissing}>
+              <div className={styles.refMissingText}>The project admin file could not be loaded. Update the URL below.</div>
+              <div className={styles.refInputRow}>
+                <input
+                  className={styles.refInput}
+                  type="url"
+                  placeholder="https://github.com/org/repo/blob/main/MAINTAINERS.md"
+                  value={refInput}
+                  onChange={(event) => {
+                    setRefInput(event.target.value);
+                    setRefError(null);
+                  }}
+                />
+                <button
+                  className={styles.refSaveButton}
+                  type="button"
+                  disabled={refSaving || refInput.trim() === ""}
+                  onClick={async () => {
+                    if (!onUpdateMaintainerRef) {
+                      return;
+                    }
+                    const next = refInput.trim();
+                    if (!next) {
+                      setRefError("Enter a URL for the project admin file.");
+                      return;
+                    }
+                    setRefSaving(true);
+                    setRefError(null);
+                    try {
+                      await onUpdateMaintainerRef(next);
+                      if (onRefresh) {
+                        onRefresh();
+                      }
+                    } catch (err) {
+                      setRefError("Unable to update project admin file.");
+                    } finally {
+                      setRefSaving(false);
+                    }
+                  }}
+                >
+                  {refSaving ? "Saving..." : "Save"}
+                </button>
+              </div>
+              {refError ? <div className={styles.refError}>{refError}</div> : null}
+            </div>
+          ) : null}
+          {refBody ? (
+            <div className={styles.refMarkdown}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeRaw, [rehypeSanitize, maintainerRefSchema]]}
+              >
+                {refBody}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            <div className={styles.empty}>
+              {refStatus === "fetched" ? "No maintainer ref contents available." : "Maintainer ref not available."}
+            </div>
+          )}
+        </div>
+
+        <div className={styles.section}>
+          <h3 className={styles.subSectionTitle}>Maintainers on GitHub, not in maintainer-d</h3>
+          {refOnlyGitHub.length === 0 ? (
+            <div className={styles.empty}>None detected.</div>
+          ) : (
+            <ul className={styles.list}>
+              {refOnlyGitHub.map((handle) => (
+                <li key={handle} className={styles.listItem}>
+                  <div className={styles.listRow}>
+                    <a className={styles.link} href={`https://github.com/${handle}`} target="_blank" rel="noreferrer">
+                      @{handle}
+                    </a>
+                    {canEdit ? (
+                      <button
+                        className={styles.addButton}
+                        type="button"
+                        onClick={() => {
+                          setDraft({
+                            githubHandle: handle,
+                            name: handle,
+                            email: "",
+                            company: "",
+                            companyMode: "select",
+                            refLine: normalizedRefLines[handle.toLowerCase()] || "",
+                          });
+                          setModalOpen(true);
+                        }}
+                      >
+                        Add to maintainer-d
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const menuItems = [
+    { id: "legacy", label: "PROJECT RECORDS / LEGACY DATA" },
+    { id: "dot-project", label: "PROJECT RECORDS / DOT PROJECT YAML" },
+    { id: "license-checker", label: "SERVICES / LICENSE CHECKER" },
+    { id: "mailing-maintainers", label: "SERVICES / MAILING LISTS / MAINTAINERS" },
+    { id: "mailing-security", label: "SERVICES / MAILING LISTS / SECURITY" },
+    { id: "docs", label: "SERVICES / DOCUMENTATION" },
+    { id: "slack", label: "SERVICES / COLLABORATION / SLACK" },
+    { id: "discord", label: "SERVICES / COLLABORATION / DISCORD" },
+  ];
+
+  const renderContent = () => {
+    switch (activeSection) {
+      case "legacy":
+        return (
+          <>
+            {legacyOpen ? legacyContent : null}
+            <ProjectDiffControl
+              status={refStatus}
+              checkedAt={refCheckedAt}
+              matchCount={refMatchCount}
+              missingCount={refMissingCount}
+              refOnlyCount={refOnlyCount}
+              onRefresh={onRefresh}
+              isRefreshing={isRefreshing}
+            />
+          </>
+        );
+      case "dot-project":
+        return dotProjectSection;
+      case "license-checker":
+        return (
+          <div className={styles.section}>
+            <h3 className={styles.subSectionTitle}>License Checker</h3>
+            <p className={styles.stub}>Placeholder for FOSSA / Snyk license compliance data.</p>
+          </div>
+        );
+      case "mailing-maintainers":
+        return (
+          <div className={styles.section}>
+            <h3 className={styles.subSectionTitle}>Mailing Lists · Maintainers</h3>
+            <p className={styles.stub}>Placeholder for maintainer mailing list references (Groups.io / Google Groups).</p>
+          </div>
+        );
+      case "mailing-security":
+        return (
+          <div className={styles.section}>
+            <h3 className={styles.subSectionTitle}>Mailing Lists · Security</h3>
+            <p className={styles.stub}>Placeholder for security mailing list references.</p>
+          </div>
+        );
+      case "docs":
+        return (
+          <div className={styles.section}>
+            <h3 className={styles.subSectionTitle}>Documentation</h3>
+            <p className={styles.stub}>Placeholder for documentation hosting details.</p>
+          </div>
+        );
+      case "slack":
+        return (
+          <div className={styles.section}>
+            <h3 className={styles.subSectionTitle}>Collaboration · Slack</h3>
+            <p className={styles.stub}>Placeholder for Slack workspace/channel references.</p>
+          </div>
+        );
+      case "discord":
+        return (
+          <div className={styles.section}>
+            <h3 className={styles.subSectionTitle}>Collaboration · Discord</h3>
+            <p className={styles.stub}>Placeholder for Discord server/channel references.</p>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <Card hoverable={false} className={styles.card}>
       <div className={styles.content}>
-        <div className={styles.header}>
-          <div>
-            <h1 className={styles.name}>{name || "Unknown project"}</h1>
-            <p className={styles.subTitle}>{maturity || "—"}</p>
+        <div className={styles.topRow}>
+          <div className={styles.header}>
+            <div>
+              <h1 className={styles.name}>{name || "Unknown project"}</h1>
+              <p className={styles.subTitle}>{maturity || "—"}</p>
+            </div>
+            <div className={styles.meta}>
+              <span className={styles.metaItem}>Imported from google worksheet on {formatDate(createdAt)}</span>
+              <span className={styles.metaItem}>Last edited {formatDate(updatedAt)}</span>
+            </div>
           </div>
-          <div className={styles.meta}>
-            <span className={styles.metaItem}>
-              Imported from google worksheet on {formatDate(createdAt)}
-            </span>
-            <span className={styles.metaItem}>Last edited {formatDate(updatedAt)}</span>
-          </div>
+
         </div>
 
-        <div className={styles.columns}>
-          <div className={styles.column}>
-            <div className={styles.sectionHeader}>
-              <h2 className={styles.sectionTitle}>MAINTAINERS IN MAINTAINER-D</h2>
-            </div>
-
-            <div className={styles.section}>
-              {maintainers.length === 0 ? (
-                <div className={styles.empty}>No maintainers found.</div>
-              ) : (
-                <ul className={styles.list}>
-                  {maintainers.map((maintainer) => (
-                    <li key={maintainer.id} className={styles.listItem}>
-                      <div className={styles.listRow}>
-                        <a className={styles.link} href={`/maintainers/${maintainer.id}`}>
-                          {maintainer.name || maintainer.github || "Unknown maintainer"}
-                        </a>
-                        {refStatus === "fetched" ? (
-                          <span
-                            className={`${styles.statusBadge} ${
-                              maintainer.inMaintainerRef ? styles.statusOk : styles.statusWarn
-                            }`}
-                          >
-                            {maintainer.inMaintainerRef ? "On GitHub" : "Missing On GitHub"}
-                          </span>
-                        ) : (
-                          <span className={`${styles.statusBadge} ${styles.statusMuted}`}>
-                            Not checked
-                          </span>
-                        )}
-                      </div>
-                      {maintainer.github ? (
-                        <span className={styles.secondary}>@{maintainer.github}</span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            <div className={styles.section}>
-              <h3 className={styles.subSectionTitle}>Project Details</h3>
-              <div className={styles.detailRow}>
-                <span className={styles.detailLabel}>Onboarding Issue</span>
-                {normalizedOnboardingIssue !== "—" && isLink(normalizedOnboardingIssue) ? (
-                  <a
-                    className={styles.link}
-                    href={normalizedOnboardingIssue}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {normalizedOnboardingIssue}
-                  </a>
-                ) : (
-                  <span>{normalizedOnboardingIssue}</span>
-                )}
-              </div>
-              <div className={styles.detailRow}>
-                <span className={styles.detailLabel}>Mailing List</span>
-                <span>{normalizedMailingList}</span>
-              </div>
-            </div>
-
-            <div className={styles.section}>
-              <h3 className={styles.subSectionTitle}>Services</h3>
-              {services.length === 0 ? (
-                <div className={styles.empty}>No services found.</div>
-              ) : (
-                <ul className={styles.list}>
-                  {services.map((service) => (
-                    <li key={service.id} className={styles.listItem}>
-                      <span>{service.name || "Unknown service"}</span>
-                      {service.description ? (
-                        <span className={styles.secondary}>{service.description}</span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
+        <div className={styles.bottomRow}>
+          <div className={styles.menuColumn}>
+            <div className={styles.projectMenu}>
+              {menuItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`${styles.menuItem} ${activeSection === item.id ? styles.menuItemActive : ""}`}
+                  onClick={() => setActiveSection(item.id)}
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
           </div>
-
-          <div className={styles.column}>
-            <div className={styles.sectionHeader}>
-              <h2 className={styles.sectionTitle}>
-                {refUrl ? (
-                  <a className={styles.refTitleLink} href={refUrl} target="_blank" rel="noreferrer">
-                    PROJECT ADMIN FILE
-                    <span className={styles.refTitleUrl}>{refUrl}</span>
-                  </a>
-                ) : (
-                  "PROJECT ADMIN FILE"
-                )}
-              </h2>
-            </div>
-
-            <div className={styles.section}>
-              {!refUrl && canEdit && onUpdateMaintainerRef ? (
-                <div className={styles.refMissing}>
-                  <div className={styles.refMissingText}>
-                    No project admin file is registered for this project.
-                  </div>
-                  <div className={styles.refInputRow}>
-                    <input
-                      className={styles.refInput}
-                      type="url"
-                      placeholder="https://github.com/org/repo/blob/main/MAINTAINERS.md"
-                      value={refInput}
-                      onChange={(event) => {
-                        setRefInput(event.target.value);
-                        setRefError(null);
-                      }}
-                    />
-                    <button
-                      className={styles.refSaveButton}
-                      type="button"
-                      disabled={refSaving || refInput.trim() === ""}
-                      onClick={async () => {
-                        if (!onUpdateMaintainerRef) {
-                          return;
-                        }
-                        const next = refInput.trim();
-                        if (!next) {
-                          setRefError("Enter a URL for the project admin file.");
-                          return;
-                        }
-                        setRefSaving(true);
-                        setRefError(null);
-                        try {
-                          await onUpdateMaintainerRef(next);
-                          setRefInput("");
-                          if (onRefresh) {
-                            onRefresh();
-                          }
-                        } catch (err) {
-                          setRefError("Unable to update project admin file.");
-                        } finally {
-                          setRefSaving(false);
-                        }
-                      }}
-                    >
-                      {refSaving ? "Saving..." : "Save"}
-                    </button>
-                  </div>
-                  {refError ? <div className={styles.refError}>{refError}</div> : null}
-                </div>
-              ) : null}
-              {isRefBroken && canEdit && onUpdateMaintainerRef ? (
-                <div className={styles.refMissing}>
-                  <div className={styles.refMissingText}>
-                    The project admin file could not be loaded. Update the URL below.
-                  </div>
-                  <div className={styles.refInputRow}>
-                    <input
-                      className={styles.refInput}
-                      type="url"
-                      placeholder="https://github.com/org/repo/blob/main/MAINTAINERS.md"
-                      value={refInput}
-                      onChange={(event) => {
-                        setRefInput(event.target.value);
-                        setRefError(null);
-                      }}
-                    />
-                    <button
-                      className={styles.refSaveButton}
-                      type="button"
-                      disabled={refSaving || refInput.trim() === ""}
-                      onClick={async () => {
-                        if (!onUpdateMaintainerRef) {
-                          return;
-                        }
-                        const next = refInput.trim();
-                        if (!next) {
-                          setRefError("Enter a URL for the project admin file.");
-                          return;
-                        }
-                        setRefSaving(true);
-                        setRefError(null);
-                        try {
-                          await onUpdateMaintainerRef(next);
-                          if (onRefresh) {
-                            onRefresh();
-                          }
-                        } catch (err) {
-                          setRefError("Unable to update project admin file.");
-                        } finally {
-                          setRefSaving(false);
-                        }
-                      }}
-                    >
-                      {refSaving ? "Saving..." : "Save"}
-                    </button>
-                  </div>
-                  {refError ? <div className={styles.refError}>{refError}</div> : null}
-                </div>
-              ) : null}
-              {refBody ? (
-                <div className={styles.refMarkdown}>
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[rehypeRaw, [rehypeSanitize, maintainerRefSchema]]}
-                  >
-                    {refBody}
-                  </ReactMarkdown>
-                </div>
-              ) : (
-                <div className={styles.empty}>
-                  {refStatus === "fetched"
-                    ? "No maintainer ref contents available."
-                    : "Maintainer ref not available."}
-                </div>
-              )}
-            </div>
-
-            <div className={styles.section}>
-              <h3 className={styles.subSectionTitle}>Maintainers on GitHub, not in maintainer-d</h3>
-              {refOnlyGitHub.length === 0 ? (
-                <div className={styles.empty}>None detected.</div>
-              ) : (
-                <ul className={styles.list}>
-                  {refOnlyGitHub.map((handle) => (
-                    <li key={handle} className={styles.listItem}>
-                      <div className={styles.listRow}>
-                        <a
-                          className={styles.link}
-                          href={`https://github.com/${handle}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          @{handle}
-                        </a>
-                        {canEdit ? (
-                          <button
-                            className={styles.addButton}
-                            type="button"
-                            onClick={() => {
-                              setDraft({
-                                githubHandle: handle,
-                                name: handle,
-                                email: "",
-                                company: "",
-                                companyMode: "select",
-                                refLine: refLinesMap[handle] || "",
-                              });
-                              setModalOpen(true);
-                            }}
-                          >
-                            Add to maintainer-d
-                          </button>
-                        ) : null}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+          <div className={styles.contentColumn}>
+            <div className={styles.nestedCard}>
+              <div className={styles.collapsibleHeader}>
+                <h2 className={styles.sectionTitle}>{menuItems.find((m) => m.id === activeSection)?.label}</h2>
+              </div>
+              {renderContent()}
             </div>
           </div>
         </div>
-
-        <ProjectDiffControl
-          status={refStatus}
-          checkedAt={refCheckedAt}
-          matchCount={refMatchCount}
-          missingCount={refMissingCount}
-          refOnlyCount={refOnlyCount}
-          onRefresh={onRefresh}
-          isRefreshing={isRefreshing}
-        />
 
         {modalOpen && draft ? (
           <ProjectAddMaintainerModal

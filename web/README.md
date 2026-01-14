@@ -1,97 +1,75 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## Architecture (TL;DR)
 
-## Getting Started
+- **Framework**: Next.js 16.1.1 (App Router, Turbopack in dev)
+- **React**: 19.2.3 / ReactDOM 19.2.3
+- **Design system**: `clo-ui` (CNCF UI kit) + Sass + CSS Modules
+- **Markdown**: `react-markdown`, `remark-gfm`, `rehype-raw/sanitize`
+- **Data path**: Web UI → BFF (Go) → Postgres (prod; sqlite optional local)
+- **Auth**: GitHub OAuth handled by BFF. Dev/test mode supports `/auth/test-login?login=<user>` and auto-login via `NEXT_PUBLIC_DEV_AUTH_LOGIN`.
+- **Env key**: `NEXT_PUBLIC_BFF_BASE_URL` (e.g., `http://localhost:8001` in dev)
 
-First, run the development server:
+## Page flow
+
+- `/projects/[id]` is a client component that fetches the project via BFF `/api/projects/:id` and renders the project page component.
+- Layout:
+  - Top row: project header + Project Details card.
+  - Bottom row: left vertical menu, right content pane that swaps between:
+    - Legacy Data (maintainer-d roster + Project Admin File + diff bar)
+    - Proposed dot project.yaml (stub for GitOps export)
+    - Service placeholders (license checker, mailing lists, docs, Slack/Discord)
+- Modals:
+  - Add maintainer from ref (staff-only), supports creating/selecting companies.
+- Diff:
+  - `ProjectDiffControl` shows matches/missing/ref-only GitHub handles; “re-run diff” triggers refresh.
+
+## BFF (Go) at a glance
+
+- Auth: GitHub OAuth; in dev/test we allow `/auth/test-login`.
+- Session: cookie `md_session`, in-memory store.
+- DB: Postgres in prod (`MD_DB_DRIVER=postgres`, `MD_DB_DSN=...`); sqlite supported locally.
+- Key endpoints used by the web app:
+  - `GET /api/projects/:id` (project details + ref status/body + diff data)
+  - `PATCH /api/projects/:id` (update maintainerRef URL, staff)
+  - `POST /api/maintainers/from-ref` (add maintainer, staff)
+  - `GET /api/companies`, `POST /api/companies` (staff)
+  - `GET /api/me` (role)
+
+## Dev quickstart (web)
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd web
+NEXT_PUBLIC_BFF_BASE_URL=http://localhost:8001 \
+NEXT_PUBLIC_DEV_AUTH_LOGIN=staff-tester \
+npm run dev -- --port 3000   # Turbopack hot reload
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Make sure `web-bff` is running in test mode and pointing at your local DB. For local Postgres via podman, use:
+`host=127.0.0.1 port=55432 dbname=maintainerd_local user=rk password=localpass sslmode=disable`
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Dev quickstart (web-bff)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Implementation
-
-1) Web UI calls the BFF
-
-- In `web/src/app/page.tsx` we call:
-  - `GET /api/projects?query=...&limit=...&offset=...&sort=name&direction=asc|desc&maturity=...`
-- This is done in a `useEffect` so the cards always reflect current filters/pagination.
-
-2) BFF verifies session
-
-- The route `/api/projects` is registered with `requireSession`, so only authenticated users can access it.
-- That middleware checks the `md_session` cookie against the in-memory session store.
-
-3) BFF queries SQLite via GORM
-
-- The handler is `handleProjects` in `cmd/web-bff/main.go`.
-- It uses a `SQLStore` to access the DB (new `DB()` accessor in `db/store_impl.go).
-
-Key query steps:
-
-- Start a base query:
-  - `base := s.store.DB().Model(&model.Project{})`
-- Apply filters:
-  - Maturity filter: `WHERE projects.maturity IN (...)`
-  - Query search (project name or maintainer name/login):
-    - `JOIN maintainer_projects + JOIN maintainers`
-    - `WHERE LOWER(projects.name) LIKE ... OR LOWER(maint.name) LIKE ... OR LOWER(maint.git_hub_account) LIKE ...`
-
-4) Count total results
-
-- `base.Distinct("projects.id").Count(&total)`
-- This gives you the “1–20 of N” count.
-
-5) Page + sort
-
-- Pull only IDs for the page:
-  - `SELECT DISTINCT projects.id ORDER BY projects.name asc|desc LIMIT ... OFFSET ...`
-- This gives you just the project IDs you need.
-
-6) Load project + maintainers
-
-- Query for those IDs with maintainers preloaded:
-  - `Preload("Maintainers").Where("projects.id IN ?", ids).Find(&results)`
-- Assemble a stable output list in the same order as the ID list.
-
-7) Response shape
-
-- JSON response:
-
-```
-{
-  "total": 123,
-  "projects": [
-    {
-      "id": 1,
-      "name": "Kubernetes",
-      "maturity": "Graduated",
-      "maintainers": ["alice", "bob"]
-    }
-  ]
-}
+```bash
+BFF_ADDR=:8001 \
+MD_DB_DRIVER=postgres \
+MD_DB_DSN="host=127.0.0.1 port=55432 dbname=maintainerd_local user=rk password=localpass sslmode=disable" \
+WEB_APP_BASE_URL=http://localhost:3000 \
+SESSION_COOKIE_DOMAIN= \
+SESSION_COOKIE_SECURE=false \
+BFF_TEST_MODE=true \
+GITHUB_OAUTH_CLIENT_ID=test \
+GITHUB_OAUTH_CLIENT_SECRET=test \
+go run ./cmd/web-bff
 ```
 
-8) Web renders
+## Testing
 
-- Cards are driven directly by that response; the “Maintainers” table is just the list of names from the response.
+- E2E (Playwright/Cucumber): `make web-bdd`
+- Lint: `npm run lint`
+
+## Versions (key)
+
+- Next.js: 16.1.1
+- React / ReactDOM: 19.2.3
+- TypeScript: ^5
+- ESLint: ^9
+- Playwright: ^1.55.0

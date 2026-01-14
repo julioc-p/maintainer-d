@@ -14,7 +14,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go build -o /bootstrap ./cmd/bootstrap && \
     go build -o /maintainerd ./main.go && \
-    go build -o /sync ./cmd/sync
+    go build -o /sync ./cmd/sync && \
+    go build -o /sanitize ./cmd/sanitize && \
+    go build -o /migrate ./cmd/migrate
 
 FROM gcr.io/distroless/base-debian12 AS maintainerd
 COPY --from=build /bootstrap /usr/local/bin/bootstrap
@@ -24,3 +26,11 @@ ENTRYPOINT ["/usr/local/bin/maintainerd"]
 FROM gcr.io/distroless/base-debian12 AS sync
 COPY --from=build /sync /usr/local/bin/sync
 ENTRYPOINT ["/usr/local/bin/sync"]
+
+FROM gcr.io/distroless/base-debian12 AS sanitize
+COPY --from=build /sanitize /usr/local/bin/sanitize
+ENTRYPOINT ["/usr/local/bin/sanitize"]
+
+FROM gcr.io/distroless/base-debian12 AS migrate
+COPY --from=build /migrate /usr/local/bin/migrate
+ENTRYPOINT ["/usr/local/bin/migrate"]

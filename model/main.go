@@ -15,12 +15,13 @@ const (
 	ActiveMaintainer   MaintainerStatus = "Active"
 	EmeritusMaintainer MaintainerStatus = "Emeritus"
 	RetiredMaintainer  MaintainerStatus = "Retired"
+	ArchivedMaintainer MaintainerStatus = "Archived"
 )
 
 // IsValid returns true id MaintainerStatus is known
 func (s MaintainerStatus) IsValid() bool {
 	switch s {
-	case ActiveMaintainer, EmeritusMaintainer, RetiredMaintainer:
+	case ActiveMaintainer, EmeritusMaintainer, RetiredMaintainer, ArchivedMaintainer:
 		return true
 	}
 	return false
@@ -95,6 +96,17 @@ type Maintainer struct {
 	RegisteredAt     *time.Time
 	CompanyID        *uint
 	Company          Company
+}
+
+// MaintainerRefCache stores fetch metadata for a project's maintainer reference file.
+type MaintainerRefCache struct {
+	ProjectID    uint   `gorm:"primaryKey"`
+	ETag         string `gorm:"size:255"`
+	LastModified *time.Time
+	BodyHash     string `gorm:"size:128"` // sha256 hex
+	LastChecked  *time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 type Collaborator struct {
 	gorm.Model

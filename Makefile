@@ -9,6 +9,10 @@ IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd:$(TAG)
 IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd:latest
 SYNC_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-sync:$(TAG)
 SYNC_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-sync:latest
+SANITIZE_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-sanitize:$(TAG)
+SANITIZE_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-sanitize:latest
+MIGRATE_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-migrate:$(TAG)
+MIGRATE_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-migrate:latest
 WEB_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web:$(TAG)
 WEB_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web:latest
 WEB_BFF_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web-bff:$(TAG)
@@ -55,6 +59,16 @@ mntrd-image-build:
 sync-image-build:
 	@echo "Building sync image: $(SYNC_IMAGE)"
 	@$(CONTAINER_TOOL) build -t $(SYNC_IMAGE) -f Dockerfile --target sync .
+
+.PHONY: sanitize-image-build
+sanitize-image-build:
+	@echo "Building sanitize image: $(SANITIZE_IMAGE)"
+	@$(CONTAINER_TOOL) build -t $(SANITIZE_IMAGE) -f Dockerfile --target sanitize .
+
+.PHONY: migrate-image-build
+migrate-image-build:
+	@echo "Building migrate image: $(MIGRATE_IMAGE)"
+	@$(CONTAINER_TOOL) build -t $(MIGRATE_IMAGE) -f Dockerfile --target migrate .
 
 .PHONY: web-image-build
 web-image-build:
@@ -115,6 +129,36 @@ sync-image-push: sync-image-build
 	@$(CONTAINER_TOOL) tag $(SYNC_IMAGE) $(SYNC_IMAGE_LATEST)
 	@$(CONTAINER_TOOL) push $(SYNC_IMAGE_LATEST)
 
+.PHONY: sanitize-image-push
+sanitize-image-push: sanitize-image-build
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@if [ -n "$(GHCR_TOKEN)" ]; then \
+		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+	else \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
+	fi
+	@echo "Pushing image: $(SANITIZE_IMAGE)"
+	@$(CONTAINER_TOOL) push $(SANITIZE_IMAGE)
+	@echo "Tagging and pushing latest: $(SANITIZE_IMAGE_LATEST)"
+	@$(CONTAINER_TOOL) tag $(SANITIZE_IMAGE) $(SANITIZE_IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(SANITIZE_IMAGE_LATEST)
+
+.PHONY: migrate-image-push
+migrate-image-push: migrate-image-build
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@if [ -n "$(GHCR_TOKEN)" ]; then \
+		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+	else \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
+	fi
+	@echo "Pushing image: $(MIGRATE_IMAGE)"
+	@$(CONTAINER_TOOL) push $(MIGRATE_IMAGE)
+	@echo "Tagging and pushing latest: $(MIGRATE_IMAGE_LATEST)"
+	@$(CONTAINER_TOOL) tag $(MIGRATE_IMAGE) $(MIGRATE_IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(MIGRATE_IMAGE_LATEST)
+
 .PHONY: web-image-push
 web-image-push: web-image-build
 	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
@@ -174,6 +218,42 @@ sync-run:
 	kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) create job --from=cronjob/maintainer-sync $$job; \
 	'
 
+.PHONY: bootstrap-run
+bootstrap-run: ensure-ns sops-apply-bootstrap-secrets apply-creds
+	@bash -c 'set -euo pipefail; \
+	echo "Verifying maintainerd-db-env exists in namespace $(NAMESPACE) [ctx=$(CTX_STR)]"; \
+	kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) get secret maintainerd-db-env >/dev/null; \
+	echo "Recreating bootstrap job in namespace $(NAMESPACE) [ctx=$(CTX_STR)]"; \
+	kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) delete job/maintainerd-bootstrap --ignore-not-found; \
+	kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/manifests/bootstrap-job.yaml; \
+	echo "Waiting for bootstrap job to complete [ctx=$(CTX_STR)]"; \
+	if ! kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) wait --for=condition=complete job/maintainerd-bootstrap --timeout=600s; then \
+		echo "Bootstrap job failed or timed out. Recent logs:"; \
+		kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) logs job/maintainerd-bootstrap --tail=200 || true; \
+		exit 1; \
+	fi; \
+	kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) logs job/maintainerd-bootstrap --tail=200; \
+	echo "Bootstrap job completed."; \
+	'
+
+.PHONY: bootstrap-run-dev
+bootstrap-run-dev: ensure-ns apply-env apply-creds
+	@bash -c 'set -euo pipefail; \
+	echo "Verifying maintainerd-db-env exists in namespace $(NAMESPACE) [ctx=$(CTX_STR)]"; \
+	kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) get secret maintainerd-db-env >/dev/null; \
+	echo "Recreating bootstrap job in namespace $(NAMESPACE) [ctx=$(CTX_STR)]"; \
+	kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) delete job/maintainerd-bootstrap --ignore-not-found; \
+	kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/manifests/bootstrap-job.yaml; \
+	echo "Waiting for bootstrap job to complete [ctx=$(CTX_STR)]"; \
+	if ! kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) wait --for=condition=complete job/maintainerd-bootstrap --timeout=600s; then \
+		echo "Bootstrap job failed or timed out. Recent logs:"; \
+		kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) logs job/maintainerd-bootstrap --tail=200 || true; \
+		exit 1; \
+	fi; \
+	kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) logs job/maintainerd-bootstrap --tail=200; \
+	echo "Bootstrap job completed."; \
+	'
+
 .PHONY: migrate-schema
 migrate-schema:
 	@echo "Running schema migration job in namespace $(NAMESPACE) [ctx=$(CTX_STR)]"
@@ -215,6 +295,7 @@ NAMESPACE ?= maintainerd
 ENVSRC    ?= .envrc
 ENVOUT    ?= bootstrap.env
 KUBECONTEXT ?=
+ESLINT_MAX_WARNINGS ?= 999
 
 
 # Secret names (keep these stable across clusters)
@@ -252,18 +333,22 @@ help:
 	@echo ""
 	@echo "== Deployment =="
 	@echo "Image tags: <branch>-<shortsha>-<DAY-MON-DD-YYYY> (UTC), plus latest"
-	@echo "make secrets         -> build $(ENVOUT) from $(ENVSRC) and apply both Secrets"
-	@echo "make env             -> build $(ENVOUT) from $(ENVSRC)"
-	@echo "make apply-env       -> create/update $(ENV_SECRET_NAME) from $(ENVOUT)"
+	@echo "make secrets         -> dev-only: build $(ENVOUT) from $(ENVSRC) and apply both Secrets"
+	@echo "make env             -> dev-only: build $(ENVOUT) from $(ENVSRC)"
+	@echo "make apply-env       -> dev-only: create/update $(ENV_SECRET_NAME) from $(ENVOUT)"
 	@echo "make apply-creds     -> create/update $(CREDS_SECRET_NAME) from $(CREDS_FILE)"
 	@echo "make apply-web-env   -> create/update $(WEB_ENV_SECRET_NAME) from $(WEB_ENV_TEMPLATE)"
 	@echo "make apply-web-bff-env -> create/update $(WEB_BFF_ENV_SECRET_NAME) from $(WEB_BFF_ENV_TEMPLATE)"
 	@echo "make web-secrets     -> apply both web secrets from templates"
 	@echo "make sops-encrypt-web-secrets -> encrypt web/db secrets in deploy/secrets (uses SOPS_AGE_KEY)"
+	@echo "make sops-encrypt-bootstrap-secrets -> encrypt bootstrap secrets in deploy/secrets (uses SOPS_AGE_KEY)"
 	@echo "make sops-envsubst-encrypt -> envsubst templates into deploy/secrets then sops-encrypt (uses SOPS_AGE_KEY)"
+	@echo "make sops-envsubst-encrypt-bootstrap -> envsubst bootstrap template into deploy/secrets then sops-encrypt (uses SOPS_AGE_KEY)"
 	@echo "make sops-edit-web-secrets -> edit encrypted web secrets with sops"
+	@echo "make sops-edit-bootstrap-secrets -> edit encrypted bootstrap secrets with sops"
 	@echo "make sops-edit-web-bff-secrets -> edit only the web-bff secret with sops"
 	@echo "make sops-apply-web-secrets -> apply web secrets from SOPS (uses local sops; set SOPS_CMD or SOPS_AGE_KEY_FILE if needed)"
+	@echo "make sops-apply-bootstrap-secrets -> apply bootstrap secrets from SOPS"
 	@echo "make deploy-web -> apply web-bff/web services + deployments + ingress + cert"
 	@echo "make web-image-set TAG=... -> set maintainerd-web image to a specific tag"
 	@echo "make clean-env       -> remove $(ENVOUT)"
@@ -273,6 +358,8 @@ help:
 	@echo "make mntrd-image-deploy -> build, push, and restart Deployment in $(NAMESPACE)"
 	@echo "make sync-apply      -> apply CronJob + RBAC for the sync job"
 	@echo "make sync-run        -> trigger a manual sync job and tail logs"
+	@echo "make bootstrap-run   -> prod: recreate bootstrap job after applying SOPS bootstrap secrets"
+	@echo "make bootstrap-run-dev -> dev: recreate bootstrap job after applying .envrc secrets"
 	@echo "make migrate-schema  -> run one-off schema migration job"
 	@echo "make migrate-schema-safe -> scale down, run migration pinned to attached node, scale back up"
 	@echo "make ensure-ns       -> ensure namespace $(NAMESPACE) exists"
@@ -499,6 +586,26 @@ sops-apply-web-secrets:
 	decrypt deploy/secrets/maintainerd-db-env.yaml | kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f -; \
 	echo "Web secrets applied from SOPS."'
 
+.PHONY: sops-apply-bootstrap-secrets
+sops-apply-bootstrap-secrets:
+	@echo "Applying bootstrap secrets from SOPS [ns=$(NAMESPACE)]"
+	@bash -c 'set -euo pipefail; \
+	if [ ! -f "deploy/secrets/maintainerd-bootstrap-env.yaml" ]; then \
+		echo "Missing encrypted secret deploy/secrets/maintainerd-bootstrap-env.yaml."; \
+		echo "Create it from deploy/templates/maintainerd-bootstrap-env.yaml.tmpl and encrypt with sops."; \
+		exit 1; \
+	fi; \
+	decrypt() { \
+		file="$$1"; \
+		if [ -n "$(SOPS_AGE_KEY_FILE)" ]; then \
+			SOPS_AGE_KEY_FILE="$(SOPS_AGE_KEY_FILE)" $(SOPS_CMD) -d $$file; \
+		else \
+			$(SOPS_CMD) -d $$file; \
+		fi; \
+	}; \
+	decrypt deploy/secrets/maintainerd-bootstrap-env.yaml | kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f -; \
+	echo "Bootstrap secrets applied from SOPS."'
+
 .PHONY: sops-encrypt-web-secrets
 sops-encrypt-web-secrets:
 	@bash -c 'set -euo pipefail; \
@@ -512,6 +619,18 @@ sops-encrypt-web-secrets:
 		$(SOPS_CMD) --age $(SOPS_AGE_KEY) -e -i $$file; \
 	done; \
 	echo "Encrypted web secrets with sops.";'
+
+.PHONY: sops-encrypt-bootstrap-secrets
+sops-encrypt-bootstrap-secrets:
+	@bash -c 'set -euo pipefail; \
+	if [ -z "$(SOPS_AGE_KEY)" ]; then \
+		echo "Set SOPS_AGE_KEY to the age public key used for encryption."; exit 1; \
+	fi; \
+	if [ ! -f "deploy/secrets/maintainerd-bootstrap-env.yaml" ]; then \
+		echo "Missing deploy/secrets/maintainerd-bootstrap-env.yaml"; exit 1; \
+	fi; \
+	$(SOPS_CMD) --age $(SOPS_AGE_KEY) -e -i deploy/secrets/maintainerd-bootstrap-env.yaml; \
+	echo "Encrypted bootstrap secrets with sops.";'
 
 .PHONY: sops-envsubst-encrypt
 sops-envsubst-encrypt:
@@ -528,6 +647,20 @@ sops-envsubst-encrypt:
 	envsubst < deploy/templates/maintainerd-web-bff-env.yaml.tmpl > deploy/secrets/maintainerd-web-bff-env.yaml; \
 	envsubst < deploy/templates/maintainerd-db-env.yaml.tmpl > deploy/secrets/maintainerd-db-env.yaml; \
 	$(MAKE) sops-encrypt-web-secrets SOPS_AGE_KEY="$(SOPS_AGE_KEY)" SOPS_CMD="$(SOPS_CMD)";'
+
+.PHONY: sops-envsubst-encrypt-bootstrap
+sops-envsubst-encrypt-bootstrap:
+	@bash -c 'set -euo pipefail; \
+	if [ -z "$(SOPS_AGE_KEY)" ]; then \
+		echo "Set SOPS_AGE_KEY to the age public key used for encryption."; exit 1; \
+	fi; \
+	for var in MD_WORKSHEET FOSSA_API_TOKEN WORKSPACE_CREDENTIALS_FILE; do \
+		if [ -z "$${!var:-}" ]; then \
+			echo "Missing required env var: $$var"; exit 1; \
+		fi; \
+	done; \
+	envsubst < deploy/templates/maintainerd-bootstrap-env.yaml.tmpl > deploy/secrets/maintainerd-bootstrap-env.yaml; \
+	$(MAKE) sops-encrypt-bootstrap-secrets SOPS_AGE_KEY="$(SOPS_AGE_KEY)" SOPS_CMD="$(SOPS_CMD)";'
 
 .PHONY: sops-edit-web-secrets
 sops-edit-web-secrets:
@@ -547,6 +680,15 @@ sops-edit-web-secrets:
 	edit deploy/secrets/maintainerd-web-env.yaml; \
 	edit deploy/secrets/maintainerd-web-bff-env.yaml; \
 	edit deploy/secrets/maintainerd-db-env.yaml;'
+
+.PHONY: sops-edit-bootstrap-secrets
+sops-edit-bootstrap-secrets:
+	@bash -c 'set -euo pipefail; \
+	if [ -n "$(SOPS_AGE_KEY_FILE)" ]; then \
+		SOPS_AGE_KEY_FILE="$(SOPS_AGE_KEY_FILE)" $(SOPS_CMD) deploy/secrets/maintainerd-bootstrap-env.yaml; \
+	else \
+		$(SOPS_CMD) deploy/secrets/maintainerd-bootstrap-env.yaml; \
+	fi;'
 
 .PHONY: sops-edit-web-bff-secrets
 sops-edit-web-bff-secrets:
@@ -749,6 +891,9 @@ ci-local:
 	@echo "→ Running golangci-lint..."
 	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint not installed. Run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; exit 1; }
 	@golangci-lint run ./...
+	@echo "→ Running web eslint..."
+	@rm -rf web/work/testdata/next-dist web/testdata/next-dist web/tmp || true
+	@npm --prefix web run lint -- --max-warnings=$(ESLINT_MAX_WARNINGS)
 	@echo "→ Running tests with race detector..."
 	@go test -race -coverprofile=coverage.out -covermode=atomic ./...
 	@echo "→ Coverage report:"

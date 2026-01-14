@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: maintainer-sanitize
+  namespace: maintainerd
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  suspend: false
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 3600
+      backoffLimit: 1
+      template:
+        spec:
+          serviceAccountName: maintainer-sync
+          restartPolicy: Never
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    app: maintainerd
+                namespaces:
+                - maintainerd
+                topologyKey: kubernetes.io/hostname
+          imagePullSecrets:
+          - name: ghcr-secret
+          containers:
+          - name: sanitize
+            image: ghcr.io/robertkielty/maintainerd-sanitize:latest
+            imagePullPolicy: Always
+            envFrom:
+            - secretRef:
+                name: maintainerd-db-env
+            resources: {}
+            terminationMessagePolicy: File

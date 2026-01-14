@@ -1,34 +1,22 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: maintainerd-bootstrap
+  name: maintainerd-migrate-schema
   namespace: maintainerd
 spec:
-  backoffLimit: 1
-  ttlSecondsAfterFinished: 600
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 1800
   template:
     spec:
       restartPolicy: Never
+      serviceAccountName: maintainer-sync
       imagePullSecrets:
-        - name: ghcr-secret
+      - name: ghcr-secret
       containers:
-        - name: bootstrap
-          image: ghcr.io/robertkielty/maintainerd:latest
-          imagePullPolicy: Always
-          command: ["/usr/local/bin/bootstrap", "--seed", "--backup=false", "--db-driver=$(MD_DB_DRIVER)", "--db-dsn=$(MD_DB_DSN)"]
-          envFrom:
-            - secretRef:
-                name: maintainerd-bootstrap-env
-            - secretRef:
-                name: maintainerd-db-env
-          env:
-            - name: WORKSPACE_CREDENTIALS_FILE
-              value: /creds/credentials.json
-          volumeMounts:
-            - name: creds
-              mountPath: /creds
-              readOnly: true
-      volumes:
-        - name: creds
-          secret:
-            secretName: workspace-credentials
+      - name: migrate
+        image: ghcr.io/robertkielty/maintainerd-migrate:latest
+        imagePullPolicy: Always
+        envFrom:
+        - secretRef:
+            name: maintainerd-db-env
+        resources: {}

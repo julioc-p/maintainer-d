@@ -60,6 +60,7 @@ func (s *SQLStore) GetProjectByID(projectID uint) (*model.Project, error) {
 	var project model.Project
 	err := s.db.
 		Preload("Maintainers").
+		Preload("Maintainers.Company").
 		Preload("Services").
 		First(&project, projectID).Error
 	if err != nil {
@@ -69,6 +70,13 @@ func (s *SQLStore) GetProjectByID(projectID uint) (*model.Project, error) {
 		return nil, err
 	}
 	return &project, nil
+}
+
+// ListProjectsWithMaintainers returns all projects with maintainer associations preloaded.
+func (s *SQLStore) ListProjectsWithMaintainers() ([]model.Project, error) {
+	var projects []model.Project
+	err := s.db.Preload("Maintainers").Preload("Maintainers.Company").Find(&projects).Error
+	return projects, err
 }
 
 func (s *SQLStore) UpdateProjectMaintainerRef(projectID uint, ref string) error {
@@ -209,6 +217,36 @@ func (s *SQLStore) GetMaintainersByProject(projectID uint) ([]model.Maintainer, 
 
 }
 
+// UpdateMaintainerStatus updates the MaintainerStatus for a given maintainer.
+func (s *SQLStore) UpdateMaintainerStatus(maintainerID uint, status model.MaintainerStatus) error {
+	if !status.IsValid() {
+		return fmt.Errorf("invalid maintainer status %q", status)
+	}
+	result := s.db.Model(&model.Maintainer{}).
+		Where("id = ?", maintainerID).
+		Update("maintainer_status", status)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// UpdateMaintainersStatus updates multiple maintainers to the given status.
+func (s *SQLStore) UpdateMaintainersStatus(ids []uint, status model.MaintainerStatus) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if !status.IsValid() {
+		return fmt.Errorf("invalid maintainer status %q", status)
+	}
+	return s.db.Model(&model.Maintainer{}).
+		Where("id IN ?", ids).
+		Update("maintainer_status", status).Error
+}
+
 func (s *SQLStore) GetServiceTeamByProject(projectID, serviceID uint) (*model.ServiceTeam, error) {
 	var st model.ServiceTeam
 	err := s.db.
@@ -218,6 +256,60 @@ func (s *SQLStore) GetServiceTeamByProject(projectID, serviceID uint) (*model.Se
 		return nil, nil
 	}
 	return &st, err
+}
+
+// GetMaintainerRefCache returns the cached metadata for a project's maintainer ref, or nil if none.
+func (s *SQLStore) GetMaintainerRefCache(projectID uint) (*model.MaintainerRefCache, error) {
+	var cache model.MaintainerRefCache
+	err := s.db.Where("project_id = ?", projectID).First(&cache).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &cache, nil
+}
+
+// UpsertMaintainerRefCache inserts or updates maintainer ref cache metadata.
+func (s *SQLStore) UpsertMaintainerRefCache(cache *model.MaintainerRefCache) error {
+	if cache == nil {
+		return nil
+	}
+	return s.db.Save(cache).Error
+}
+
+// MergeCompanies reassigns all maintainers from fromID to toID and deletes the source company.
+func (s *SQLStore) MergeCompanies(fromID, toID uint) error {
+	if fromID == toID {
+		return fmt.Errorf("fromID and toID must differ")
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// Ensure target exists.
+		var target model.Company
+		if err := tx.First(&target, toID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("target company %d not found", toID)
+			}
+			return err
+		}
+		// Ensure source exists.
+		var source model.Company
+		if err := tx.First(&source, fromID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("source company %d not found", fromID)
+			}
+			return err
+		}
+
+		if err := tx.Model(&model.Maintainer{}).Where("company_id = ?", fromID).Update("company_id", toID).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&model.Company{}, fromID).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // GetMaintainerMapByEmail returns a map of Maintainers keyed by email address
