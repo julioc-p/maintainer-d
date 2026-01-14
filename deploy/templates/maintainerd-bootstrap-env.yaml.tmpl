@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: maintainerd-bootstrap-env
+  namespace: maintainerd
+type: Opaque
+stringData:
+  MD_WORKSHEET: ${MD_WORKSHEET}
+  WORKSPACE_CREDENTIALS_FILE: ${WORKSPACE_CREDENTIALS_FILE}
+  FOSSA_API_TOKEN: ${FOSSA_API_TOKEN}
