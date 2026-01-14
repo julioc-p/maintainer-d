@@ -18,11 +18,12 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	rbacv1 "k8s.io/api/rbac/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -145,13 +146,17 @@ func (r *StaffMemberReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	logger.Info("Built subjects list", "subjectCount", len(subjects))
 
 	// Update binding in all workspaces
-	var reconcileErrors []error
+	var workspaceErrors []error
+	var failedWorkspaces []string
 	successCount := 0
+	totalWorkspaces := len(workspaces)
+
 	for _, ws := range workspaces {
 		logger.Info("Updating staff binding in workspace", "workspace", ws.Name)
 		if err := kcpClient.CreateOrUpdateStaffBinding(ctx, ws.Name, subjects); err != nil {
 			logger.Error(err, "Failed to update staff binding", "workspace", ws.Name)
-			reconcileErrors = append(reconcileErrors, err)
+			workspaceErrors = append(workspaceErrors, fmt.Errorf("workspace %s: %w", ws.Name, err))
+			failedWorkspaces = append(failedWorkspaces, ws.Name)
 		} else {
 			successCount++
 		}
@@ -160,7 +165,7 @@ func (r *StaffMemberReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// Update StaffMember annotations with sync status, but only if this was not a workspace-triggered reconcile
 	if req.Name != workspaceTrigger {
 		syncStatus := "success"
-		if len(reconcileErrors) > 0 {
+		if len(workspaceErrors) > 0 {
 			syncStatus = "partial"
 			if successCount == 0 {
 				syncStatus = "error"
@@ -176,15 +181,22 @@ func (r *StaffMemberReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	if len(reconcileErrors) > 0 {
-		logger.Error(fmt.Errorf("failed to update %d workspaces", len(reconcileErrors)),
-			"Reconciliation completed with errors")
-		return ctrl.Result{RequeueAfter: 30 * time.Second},
-			fmt.Errorf("failed to update %d workspaces", len(reconcileErrors))
+	// Aggregate and return errors if any workspace updates failed
+	if len(workspaceErrors) > 0 {
+		aggregatedErr := errors.Join(workspaceErrors...)
+		logger.Error(aggregatedErr, "Reconciliation completed with errors",
+			"successCount", successCount,
+			"failedCount", len(workspaceErrors),
+			"totalWorkspaces", totalWorkspaces,
+			"failedWorkspaces", failedWorkspaces)
+
+		// Return error for controller-runtime to handle requeue with exponential backoff
+		return ctrl.Result{}, aggregatedErr
 	}
 
 	logger.Info("Reconciliation completed successfully",
-		"workspacesUpdated", successCount)
+		"workspacesUpdated", successCount,
+		"totalWorkspaces", totalWorkspaces)
 	return ctrl.Result{}, nil
 }
 
@@ -204,7 +216,7 @@ func (r *StaffMemberReconciler) updateStaffMemberAnnotations(ctx context.Context
 		Name:      staffMemberName,
 		Namespace: r.StaffMemberNamespace,
 	}, staffMember); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			// StaffMember was deleted, nothing to update
 			return nil
 		}
