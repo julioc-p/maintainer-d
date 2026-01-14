@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: wbkubermatic/cncf-kdp-workspaces
-  newTag: latest
+  newTag: 0.0.2
