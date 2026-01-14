@@ -894,6 +894,8 @@ ci-local:
 	@echo "→ Running web eslint..."
 	@rm -rf web/work/testdata/next-dist web/testdata/next-dist web/tmp || true
 	@npm --prefix web run lint -- --max-warnings=$(ESLINT_MAX_WARNINGS)
+	@echo "→ Running web typecheck..."
+	@npm --prefix web run typecheck
 	@echo "→ Running tests with race detector..."
 	@go test -race -coverprofile=coverage.out -covermode=atomic ./...
 	@echo "→ Coverage report:"

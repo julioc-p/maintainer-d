@@ -175,11 +175,11 @@ export default function AuditPage() {
                   {rangeStart}-{rangeEnd} of {total}
                 </div>
                 <Pagination
-                  totalItems={total}
-                  itemsPerPage={limit}
-                  currentPage={page}
-                  onPageChange={(next) => setPage(next)}
-                  btnsLabels={{ next: "Next", previous: "Previous" }}
+                  limit={limit}
+                  total={total}
+                  offset={offset}
+                  active={page}
+                  onChange={(next) => setPage(next)}
                 />
               </div>
             ) : null}
