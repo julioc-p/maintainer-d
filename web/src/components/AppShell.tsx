@@ -5,6 +5,7 @@ import { Dropdown } from "clo-ui/components/Dropdown";
 import { Footer } from "clo-ui/components/Footer";
 import { Navbar } from "clo-ui/components/Navbar";
 import Link from "next/link";
+import { useTheme } from "./ThemeProvider";
 import styles from "./AppShell.module.css";
 
 type AppShellProps = {
@@ -24,7 +25,7 @@ export default function AppShell({
   navCenterClassName,
 }: AppShellProps) {
   const [me, setMe] = useState<MeResponse | null>(null);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const { theme, toggleTheme } = useTheme();
   const devLoginAttemptedRef = useRef(false);
 
   const bffBaseUrl = useMemo(() => {
@@ -49,21 +50,6 @@ export default function AppShell({
     }
     return bffBaseUrl;
   }, [bffBaseUrl]);
-
-  useEffect(() => {
-    if (typeof document === "undefined") {
-      return;
-    }
-    document.documentElement.setAttribute("data-theme", theme);
-    const themeColor = theme === "light" ? "#2a0552" : "#0f0e11";
-    const meta = document.querySelector(`meta[name="theme-color"]`);
-    if (meta) {
-      meta.setAttribute("content", themeColor);
-    }
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("md_theme", theme);
-    }
-  }, [theme]);
 
   useEffect(() => {
     let alive = true;
@@ -150,14 +136,9 @@ export default function AppShell({
             <button
               className={styles.themeToggle}
               type="button"
-              suppressHydrationWarning
-              onClick={() =>
-                setTheme((current) => (current === "light" ? "dark" : "light"))
-              }
+              onClick={toggleTheme}
             >
-              <span suppressHydrationWarning>
-                {theme === "light" ? "Dark mode" : "Light mode"}
-              </span>
+              {theme === "light" ? "Dark mode" : "Light mode"}
             </button>
             {me?.role === "staff" ? (
               <Link className={styles.auditButton} href="/audit">

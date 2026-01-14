@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
+import { ThemeProvider } from "@/components/ThemeProvider";
 import { Geist, Geist_Mono } from "next/font/google";
 import "clo-ui/styles/default.scss";
 import "./globals.css";
@@ -48,7 +49,9 @@ export default function RootLayout({
 })();`,
           }}
         />
-        <div id="clo-wrapper">{children}</div>
+        <ThemeProvider>
+          <div id="clo-wrapper">{children}</div>
+        </ThemeProvider>
       </body>
     </html>
   );

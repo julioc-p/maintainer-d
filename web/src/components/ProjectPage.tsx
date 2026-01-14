@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
+import Link from "next/link";
 import styles from "./ProjectPage.module.css";
 import ProjectDiffControl from "./ProjectDiffControl";
 import ProjectAddMaintainerModal from "./ProjectAddMaintainerModal";
@@ -195,9 +196,9 @@ export default function ProjectReconciliationCard({
                   {maintainers.map((maintainer) => (
                     <li key={maintainer.id} className={styles.listItem}>
                       <div className={styles.listRow}>
-                        <a className={styles.link} href={`/maintainers/${maintainer.id}`}>
+                        <Link className={styles.link} href={`/maintainers/${maintainer.id}`}>
                           {maintainer.name || maintainer.github || "Unknown maintainer"}
-                        </a>
+                        </Link>
                         {refStatus === "fetched" ? (
                           <span
                             className={`${styles.statusBadge} ${

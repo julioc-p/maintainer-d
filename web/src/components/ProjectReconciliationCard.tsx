@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
+import Link from "next/link";
 import styles from "./ProjectReconciliationCard.module.css";
 import ProjectDiffControl from "./ProjectDiffControl";
 import ProjectAddMaintainerModal from "./ProjectAddMaintainerModal";
@@ -233,9 +234,9 @@ export default function ProjectReconciliationCard({
                       checked={checked}
                       onChange={() => toggleSelected(maintainer.id)}
                     />
-                    <a className={styles.link} href={`/maintainers/${maintainer.id}`}>
+                    <Link className={styles.link} href={`/maintainers/${maintainer.id}`}>
                       {maintainer.name || maintainer.github || "Unknown maintainer"}
-                    </a>
+                    </Link>
                     {maintainer.github ? <span className={styles.secondary}>@{maintainer.github}</span> : null}
                     {maintainer.company ? <span className={styles.secondary}>{maintainer.company}</span> : null}
                     <span className={`${styles.statusBadge} ${statusClass}`}>
