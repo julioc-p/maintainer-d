@@ -68,7 +68,7 @@ The operator uses a **multi-controller architecture** for separation of concerns
 
 ### Design Reference
 
-See `PLAN_STAFF_MEMBERS_SUPPORT.md` for detailed implementation plan and `CLAUDE_20251223_kdp_organiztion_op_design_doc.md` for architecture decisions.
+See `PLAN_STAFF_MEMBERS_SUPPORT.md` for detailed implementation plan.
 
 ## Testing Operator
 
@@ -113,7 +113,7 @@ kubectx context-cdv2c4jfn5q
 kubectl get staffmembers.maintainer-d.cncf.io -n maintainerd
 
 # Check specific staff member with annotations
-kubectl get staffmember wojciech.barczynski-kubermatic.com -n maintainerd -o yaml
+kubectl get staffmember <staff-name> -n maintainerd -o yaml
 
 # Verify staff member sync annotations
 kubectl get staffmember <staff-name> -n maintainerd \
@@ -534,8 +534,6 @@ The StaffMemberReconciler watches resources on both clusters:
 ## References
 
 - Implementation Plan: `PLAN_STAFF_MEMBERS_SUPPORT.md`
-- Design Document: `CLAUDE_20251223_kdp_organiztion_op_design_doc.md`
-- E2E Testing Guide: `E2E_TESTING_GUIDE.md`
 - Controller Pattern: Multi-controller architecture with independent reconciliation loops
 ```
 

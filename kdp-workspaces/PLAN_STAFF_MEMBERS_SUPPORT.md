@@ -800,9 +800,8 @@ The initial implementation uses a "rebuild-all" reconciliation strategy for simp
 **Files Modified:**
 - kdp-workspaces/internal/kcp/rbac_test.go (NEW) - Commit ae33fc2
 - kdp-workspaces/internal/controller/staffmember_controller_test.go (NEW) - Commit ae33fc2
-- kdp-workspaces/E2E_TESTING_GUIDE.md (NEW) - Commit caea7aa
 
-**Note:** E2E tests documented as manual procedures in E2E_TESTING_GUIDE.md due to requirement for actual KCP cluster access. Automated E2E tests deferred until CI/CD infrastructure with KCP available.
+**Note:** E2E tests require actual KCP cluster access and are documented in the Testing Operator sections of AGENTS.md and CLAUDE.md. Automated E2E tests deferred until CI/CD infrastructure with KCP available.
 
 ### Phase 5: Documentation 🔄 IN PROGRESS
 
