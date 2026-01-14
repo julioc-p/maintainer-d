@@ -23,6 +23,7 @@ type MaintainerDetail = {
   projects: { id: number; name: string }[];
   createdAt: string;
   updatedAt: string;
+  updatedBy?: string;
   deletedAt?: string | null;
 };
 
@@ -44,6 +45,7 @@ const maintainerDataHasChanged = (
     current.companyId !== next.companyId ||
     current.createdAt !== next.createdAt ||
     current.updatedAt !== next.updatedAt ||
+    current.updatedBy !== next.updatedBy ||
     current.deletedAt !== next.deletedAt
   ) {
     return true;
@@ -406,6 +408,7 @@ export default function MaintainerPage() {
               projects={maintainer.projects}
               createdAt={maintainer.createdAt}
               updatedAt={maintainer.updatedAt}
+              updatedBy={maintainer.updatedBy}
               updatedNotice={saveNotice}
             />
           )}

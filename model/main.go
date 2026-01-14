@@ -232,12 +232,14 @@ type ProjectInfo struct {
 
 type AuditLog struct {
 	gorm.Model
-	ProjectID    uint   `gorm:"index"`
-	MaintainerID *uint  `gorm:"index"`
-	ServiceID    *uint  `gorm:"index"`
-	Action       string `gorm:"index"` // e.g. "ADD_MEMBER", "REMOVE_MEMBER", "INVITE_SENT"
-	Message      string // human-readable message, optional
-	Metadata     string // optional JSON blob for advanced inspection
+	ProjectID    *uint        `gorm:"index"`
+	MaintainerID *uint        `gorm:"index"`
+	ServiceID    *uint        `gorm:"index"`
+	StaffID      *uint        `gorm:"index"`
+	Staff        *StaffMember `gorm:"foreignKey:StaffID"`
+	Action       string       `gorm:"index"` // e.g. "ADD_MEMBER", "REMOVE_MEMBER", "INVITE_SENT"
+	Message      string       // human-readable message, optional
+	Metadata     string       // optional JSON blob for advanced inspection
 }
 
 type OnboardingTask struct {

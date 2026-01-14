@@ -415,7 +415,7 @@ func (s *SQLStore) GetProjectMapByName() (map[string]model.Project, error) {
 	return projectsByName, nil
 }
 
-func (s *SQLStore) LogAuditEvent(logger *zap.SugaredLogger, event model.AuditLog) {
+func (s *SQLStore) LogAuditEvent(logger *zap.SugaredLogger, event model.AuditLog) error {
 	if event.Message == "" {
 		event.Message = event.Action
 	}
@@ -424,6 +424,7 @@ func (s *SQLStore) LogAuditEvent(logger *zap.SugaredLogger, event model.AuditLog
 	if err != nil {
 		logger.Errorf("failed to write %v audit log: %v", event, err)
 	}
+	return err
 }
 
 // CreateServiceTeam creates or retrieves a service team entry in the database based on the provided project and service details.

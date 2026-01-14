@@ -57,6 +57,36 @@ make manifests-apply
 kubectl -n maintainerd get pvc,deploy,svc,ing
 ```
 
+## Run schema migrations
+
+Goal: Apply database schema changes safely without re-importing data.
+
+1) Build and push the migrate image:
+```
+make migrate-image-build
+make migrate-image-push
+```
+
+2) Apply the migrate job manifest:
+```
+kubectl -n maintainerd apply -f deploy/manifests/maintainerd-migrate-schema-job.yaml
+```
+
+3) Wait for completion:
+```
+kubectl -n maintainerd wait --for=condition=complete job/maintainerd-migrate-schema --timeout=5m
+```
+
+4) Check logs:
+```
+kubectl -n maintainerd logs job/maintainerd-migrate-schema
+```
+
+5) Cleanup (optional):
+```
+kubectl -n maintainerd delete job/maintainerd-migrate-schema
+```
+
 ## Take a copy of the data in the database
 
 Goal: Export a snapshot of the production Postgres database.

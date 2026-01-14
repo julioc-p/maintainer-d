@@ -90,6 +90,12 @@
   gap: 8px;
 }
 
+.updatedBy {
+  color: var(--md-card-muted, rgba(15, 23, 42, 0.6));
+  font-weight: 600;
+  font-size: 12px;
+}
+
 .link {
   color: #d62293;
   font-weight: 600;

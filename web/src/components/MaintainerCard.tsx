@@ -14,6 +14,7 @@ type MaintainerCardProps = {
   projects: Array<{ id: number; name: string } | string>;
   createdAt?: string;
   updatedAt?: string;
+  updatedBy?: string;
   updatedNotice?: string | null;
 };
 
@@ -78,6 +79,7 @@ export default function MaintainerCard({
   projects,
   createdAt,
   updatedAt,
+  updatedBy,
   updatedNotice,
 }: MaintainerCardProps) {
   const displayName = name || "Unknown maintainer";
@@ -200,7 +202,10 @@ export default function MaintainerCard({
           </div>
           <div className={styles.detailRow}>
             <span className={styles.detailLabel}>Last updated</span>
-            {renderDate(updatedAt)}
+            <span className={styles.detailValue}>
+              {renderDate(updatedAt)}
+              {updatedBy ? <span className={styles.updatedBy}>by {updatedBy}</span> : null}
+            </span>
           </div>
         </div>
       </div>

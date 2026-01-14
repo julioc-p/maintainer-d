@@ -556,12 +556,14 @@ func (s *EventListener) addProjectMaintainersToFossaTeam(project model.Project, 
 		// NOTE: ServiceID is optional; we omit or could set to FOSSA ID if available.
 		if s.Store != nil {
 			lg := zapNewNopSugar()
-			s.Store.LogAuditEvent(lg, model.AuditLog{
-				ProjectID:    project.ID,
+			if err := s.Store.LogAuditEvent(lg, model.AuditLog{
+				ProjectID:    &project.ID,
 				MaintainerID: &m.ID,
 				Action:       "FOSSA_ADD_MEMBER",
 				Message:      fmt.Sprintf("Added @%s to FOSSA team %s", handle, project.Name),
-			})
+			}); err != nil {
+				log.Printf("addProjectMaintainersToFossaTeam: audit log error: %v", err)
+			}
 		}
 		// Update local cache of existing emails to avoid re-adding in this run
 		existingEmails = append(existingEmails, email)

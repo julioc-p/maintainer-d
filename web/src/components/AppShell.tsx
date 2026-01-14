@@ -159,6 +159,11 @@ export default function AppShell({
                 {theme === "light" ? "Dark mode" : "Light mode"}
               </span>
             </button>
+            {me?.role === "staff" ? (
+              <Link className={styles.auditButton} href="/audit">
+                Audit
+              </Link>
+            ) : null}
             {me ? (
               <Dropdown
                 label="User menu"

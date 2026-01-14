@@ -232,6 +232,7 @@ func main() {
 	mux.Handle("/api/maintainers/status", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMaintainerStatusUpdate))))
 	mux.Handle("/api/maintainers/from-ref", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMaintainerFromRef))))
 	mux.Handle("/api/maintainers/", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMaintainer))))
+	mux.Handle("/api/audit", s.withCORS(s.requireSession(http.HandlerFunc(s.handleAudit))))
 	mux.Handle("/api/companies/merge", s.withCORS(s.requireSession(http.HandlerFunc(s.handleCompanyMerge))))
 	mux.Handle("/api/companies", s.withCORS(s.requireSession(http.HandlerFunc(s.handleCompanies))))
 	mux.Handle("/api/", s.withCORS(s.requireSession(http.HandlerFunc(s.handleAPINotImplemented))))
@@ -781,11 +782,31 @@ type maintainerDetailResponse struct {
 	CreatedAt   time.Time                   `json:"createdAt"`
 	UpdatedAt   time.Time                   `json:"updatedAt"`
 	DeletedAt   *time.Time                  `json:"deletedAt,omitempty"`
+	UpdatedBy   string                      `json:"updatedBy,omitempty"`
 }
 
 type maintainerProjectResponse struct {
 	ID   uint   `json:"id"`
 	Name string `json:"name"`
+}
+
+type auditLogResponse struct {
+	ID           uint      `json:"id"`
+	Action       string    `json:"action"`
+	Message      string    `json:"message"`
+	Metadata     string    `json:"metadata,omitempty"`
+	CreatedAt    time.Time `json:"createdAt"`
+	ProjectID    *uint     `json:"projectId,omitempty"`
+	MaintainerID *uint     `json:"maintainerId,omitempty"`
+	ServiceID    *uint     `json:"serviceId,omitempty"`
+	StaffID      *uint     `json:"staffId,omitempty"`
+	StaffName    string    `json:"staffName,omitempty"`
+	StaffLogin   string    `json:"staffLogin,omitempty"`
+}
+
+type auditListResponse struct {
+	Total int64              `json:"total"`
+	Logs  []auditLogResponse `json:"logs"`
 }
 
 func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
@@ -849,6 +870,19 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 			response.Company = maintainer.Company.Name
 		}
 
+		var audit model.AuditLog
+		if err := s.store.DB().
+			Where("maintainer_id = ? AND action = ?", id, "MAINTAINER_UPDATE").
+			Order("created_at desc").
+			First(&audit).Error; err == nil && audit.StaffID != nil {
+			var staff model.StaffMember
+			if err := s.store.DB().First(&staff, *audit.StaffID).Error; err == nil {
+				if staff.Name != "" {
+					response.UpdatedBy = staff.Name
+				}
+			}
+		}
+
 		w.Header().Set(headerContentType, contentTypeJSON)
 		if err := json.NewEncoder(w).Encode(response); err != nil {
 			s.logger.Printf("web-bff: handleMaintainer encode error: %v", err)
@@ -862,6 +896,16 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 		var req maintainerUpdateRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		var before model.Maintainer
+		if err := s.store.DB().First(&before, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				http.Error(w, "maintainer not found", http.StatusNotFound)
+				return
+			}
+			s.logger.Printf("web-bff: update maintainer failed id=%d err=%v", id, err)
+			http.Error(w, "failed to update maintainer", http.StatusInternalServerError)
 			return
 		}
 		status := model.MaintainerStatus(strings.TrimSpace(req.Status))
@@ -878,6 +922,72 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 			s.logger.Printf("web-bff: update maintainer failed id=%d err=%v", id, err)
 			http.Error(w, "failed to update maintainer", http.StatusInternalServerError)
 			return
+		}
+
+		var staffID *uint
+		staffName := ""
+		if session.Login != "" {
+			var staff model.StaffMember
+			if err := s.store.DB().
+				Where("LOWER(git_hub_account) = ?", strings.ToLower(session.Login)).
+				First(&staff).Error; err == nil {
+				staffID = &staff.ID
+				staffName = staff.Name
+			}
+		}
+		if staffName == "" {
+			staffName = session.Login
+		}
+
+		changes := make(map[string]map[string]string)
+		beforeEmail := normalizeValue(before.Email, "EMAIL_MISSING")
+		afterEmail := normalizeValue(updated.Email, "EMAIL_MISSING")
+		if beforeEmail != afterEmail {
+			changes["email"] = map[string]string{"from": beforeEmail, "to": afterEmail}
+		}
+		beforeGitHub := normalizeValue(before.GitHubAccount, "GITHUB_MISSING")
+		afterGitHub := normalizeValue(updated.GitHubAccount, "GITHUB_MISSING")
+		if beforeGitHub != afterGitHub {
+			changes["github"] = map[string]string{"from": beforeGitHub, "to": afterGitHub}
+		}
+		if before.MaintainerStatus != updated.MaintainerStatus {
+			changes["status"] = map[string]string{
+				"from": string(before.MaintainerStatus),
+				"to":   string(updated.MaintainerStatus),
+			}
+		}
+		beforeCompany := ""
+		if before.CompanyID != nil {
+			beforeCompany = fmt.Sprintf("%d", *before.CompanyID)
+		}
+		afterCompany := ""
+		if updated.CompanyID != nil {
+			afterCompany = fmt.Sprintf("%d", *updated.CompanyID)
+		}
+		if beforeCompany != afterCompany {
+			changes["companyId"] = map[string]string{"from": beforeCompany, "to": afterCompany}
+		}
+
+		metadata := map[string]any{
+			"actor": map[string]string{
+				"login": session.Login,
+				"role":  session.Role,
+			},
+			"changes": changes,
+		}
+		if metadataJSON, err := json.Marshal(metadata); err != nil {
+			s.logger.Printf("web-bff: update maintainer audit metadata encode error: %v", err)
+		} else {
+			event := model.AuditLog{
+				MaintainerID: &id,
+				StaffID:      staffID,
+				Action:       "MAINTAINER_UPDATE",
+				Message:      fmt.Sprintf("Maintainer updated by %s", staffName),
+				Metadata:     string(metadataJSON),
+			}
+			if err := s.store.DB().Create(&event).Error; err != nil {
+				s.logger.Printf("web-bff: update maintainer audit log failed: %v", err)
+			}
 		}
 
 		projects := make([]maintainerProjectResponse, 0, len(updated.Projects))
@@ -909,6 +1019,9 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 		if updated.Company.Name != "" {
 			response.Company = updated.Company.Name
 		}
+		if staffName != "" {
+			response.UpdatedBy = staffName
+		}
 
 		w.Header().Set(headerContentType, contentTypeJSON)
 		if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -918,6 +1031,73 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+}
+
+func (s *server) handleAudit(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	session := sessionFromContext(r.Context())
+	if session == nil || session.Role != roleStaff {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	limit := parseIntParam(r, "limit", 20, 1, 200)
+	offset := parseIntParam(r, "offset", 0, 0, 10_000_000)
+
+	base := s.store.DB().Model(&model.AuditLog{})
+	var total int64
+	if err := base.Count(&total).Error; err != nil {
+		s.logger.Printf("web-bff: handleAudit count error: %v", err)
+		http.Error(w, "failed to load audit logs", http.StatusInternalServerError)
+		return
+	}
+
+	var logs []model.AuditLog
+	if err := base.
+		Preload("Staff").
+		Order("created_at desc").
+		Limit(limit).
+		Offset(offset).
+		Find(&logs).Error; err != nil {
+		s.logger.Printf("web-bff: handleAudit list error: %v", err)
+		http.Error(w, "failed to load audit logs", http.StatusInternalServerError)
+		return
+	}
+
+	response := auditListResponse{
+		Total: total,
+		Logs:  make([]auditLogResponse, 0, len(logs)),
+	}
+	for _, logEntry := range logs {
+		item := auditLogResponse{
+			ID:           logEntry.ID,
+			Action:       logEntry.Action,
+			Message:      logEntry.Message,
+			Metadata:     logEntry.Metadata,
+			CreatedAt:    logEntry.CreatedAt,
+			ProjectID:    logEntry.ProjectID,
+			MaintainerID: logEntry.MaintainerID,
+			ServiceID:    logEntry.ServiceID,
+			StaffID:      logEntry.StaffID,
+		}
+		if logEntry.Staff != nil {
+			item.StaffName = logEntry.Staff.Name
+			item.StaffLogin = logEntry.Staff.GitHubAccount
+		}
+		response.Logs = append(response.Logs, item)
+	}
+
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		s.logger.Printf("web-bff: handleAudit encode error: %v", err)
 	}
 }
 
