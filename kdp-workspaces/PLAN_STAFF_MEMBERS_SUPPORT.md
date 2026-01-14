@@ -2,7 +2,7 @@
 
 Goal: add staff members to the workspaces (that the operator creates already) with the `kdp:owner` role
 
-Provide 2 alternative solutions, if any information is missing ask, and document the answer in @PLAN_INIT.md (this file). One of them must be multi-controller.
+Provide 2 alternative solutions, if any information is missing ask, and document the answer in @PLAN_STAFF_MEMBERS_SUPPORT.md (this file). One of them must be multi-controller.
 
 ## Input
 
