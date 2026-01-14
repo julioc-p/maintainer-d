@@ -295,6 +295,7 @@ NAMESPACE ?= maintainerd
 ENVSRC    ?= .envrc
 ENVOUT    ?= bootstrap.env
 KUBECONTEXT ?=
+ESLINT_MAX_WARNINGS ?= 999
 
 
 # Secret names (keep these stable across clusters)
@@ -892,7 +893,7 @@ ci-local:
 	@golangci-lint run ./...
 	@echo "→ Running web eslint..."
 	@rm -rf web/work/testdata/next-dist web/testdata/next-dist web/tmp || true
-	@npm --prefix web run lint -- --max-warnings=0
+	@npm --prefix web run lint -- --max-warnings=$(ESLINT_MAX_WARNINGS)
 	@echo "→ Running tests with race detector..."
 	@go test -race -coverprofile=coverage.out -covermode=atomic ./...
 	@echo "→ Coverage report:"

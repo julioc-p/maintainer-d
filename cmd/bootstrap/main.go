@@ -65,9 +65,17 @@ func main() {
 				}
 			}
 			dsn := dbPath
+			if dbDriver == "sqlite" {
+				if envDriver := strings.ToLower(viper.GetString("MD_DB_DRIVER")); envDriver == "postgres" {
+					dbDriver = envDriver
+				}
+			}
+			if dbDSN == "" {
+				dbDSN = viper.GetString("MD_DB_DSN")
+			}
 			if dbDriver == "postgres" {
 				if dbDSN == "" {
-					log.Fatal("ERROR: --db-dsn is required when --db-driver=postgres")
+					log.Fatal("ERROR: --db-dsn or MD_DB_DSN is required when --db-driver=postgres")
 				}
 				dsn = dbDSN
 			}

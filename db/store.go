@@ -32,4 +32,5 @@ type Store interface {
 	ListStaffMembers() ([]model.StaffMember, error)
 	GetMaintainerRefCache(projectID uint) (*model.MaintainerRefCache, error)
 	UpsertMaintainerRefCache(cache *model.MaintainerRefCache) error
+	MergeCompanies(fromID, toID uint) error
 }

@@ -232,6 +232,7 @@ func main() {
 	mux.Handle("/api/maintainers/status", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMaintainerStatusUpdate))))
 	mux.Handle("/api/maintainers/from-ref", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMaintainerFromRef))))
 	mux.Handle("/api/maintainers/", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMaintainer))))
+	mux.Handle("/api/companies/merge", s.withCORS(s.requireSession(http.HandlerFunc(s.handleCompanyMerge))))
 	mux.Handle("/api/companies", s.withCORS(s.requireSession(http.HandlerFunc(s.handleCompanies))))
 	mux.Handle("/api/", s.withCORS(s.requireSession(http.HandlerFunc(s.handleAPINotImplemented))))
 
@@ -946,6 +947,22 @@ type createCompanyRequest struct {
 	Name string `json:"name"`
 }
 
+type mergeCompanyRequest struct {
+	FromID uint `json:"fromId"`
+	ToID   uint `json:"toId"`
+}
+
+type companyDetailResponse struct {
+	ID              uint   `json:"id"`
+	Name            string `json:"name"`
+	MaintainerCount int64  `json:"maintainerCount"`
+}
+
+type companyDuplicateGroup struct {
+	Canonical string                  `json:"canonical"`
+	Variants  []companyDetailResponse `json:"variants"`
+}
+
 func (s *server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 	session := sessionFromContext(r.Context())
 	if session == nil {
@@ -960,16 +977,49 @@ func (s *server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "failed to load companies", http.StatusInternalServerError)
 			return
 		}
-		resp := make([]companyResponse, 0, len(companies))
+
+		// Maintainer counts
+		type companyWithCount struct {
+			model.Company
+			MCount int64
+		}
+		var withCounts []companyWithCount
+		if err := s.store.DB().
+			Table("companies").
+			Select("companies.*, COUNT(m.id) as m_count").
+			Joins("LEFT JOIN maintainers m ON m.company_id = companies.id").
+			Group("companies.id").
+			Scan(&withCounts).Error; err != nil {
+			s.logger.Printf("web-bff: handleCompanies counts error: %v", err)
+			http.Error(w, "failed to load companies", http.StatusInternalServerError)
+			return
+		}
+		countMap := make(map[uint]int64, len(withCounts))
+		for _, c := range withCounts {
+			countMap[c.ID] = c.MCount
+		}
+
+		resp := make([]companyDetailResponse, 0, len(companies))
 		for _, company := range companies {
 			if strings.TrimSpace(company.Name) == "" {
 				continue
 			}
-			resp = append(resp, companyResponse{
-				ID:   company.ID,
-				Name: company.Name,
+			resp = append(resp, companyDetailResponse{
+				ID:              company.ID,
+				Name:            company.Name,
+				MaintainerCount: countMap[company.ID],
 			})
 		}
+
+		if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("duplicates")), "true") {
+			dups := groupCompanyDuplicates(resp)
+			w.Header().Set(headerContentType, contentTypeJSON)
+			if err := json.NewEncoder(w).Encode(dups); err != nil {
+				s.logger.Printf("web-bff: handleCompanies encode error: %v", err)
+			}
+			return
+		}
+
 		w.Header().Set(headerContentType, contentTypeJSON)
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			s.logger.Printf("web-bff: handleCompanies encode error: %v", err)
@@ -1004,6 +1054,62 @@ func (s *server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleAPINotImplemented(w http.ResponseWriter, _ *http.Request) {
 	http.Error(w, "api not implemented", http.StatusNotImplemented)
+}
+
+func (s *server) handleCompanyMerge(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	session := sessionFromContext(r.Context())
+	if session == nil || session.Role != roleStaff {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var req mergeCompanyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if req.FromID == 0 || req.ToID == 0 || req.FromID == req.ToID {
+		http.Error(w, "invalid ids", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.MergeCompanies(req.FromID, req.ToID); err != nil {
+		s.logger.Printf("web-bff: merge companies error: %v", err)
+		http.Error(w, "failed to merge companies", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		s.logger.Printf("web-bff: handleCompanyMerge encode error: %v", err)
+	}
+}
+
+func groupCompanyDuplicates(companies []companyDetailResponse) []companyDuplicateGroup {
+	buckets := make(map[string][]companyDetailResponse)
+	for _, c := range companies {
+		key := strings.ToLower(strings.TrimSpace(c.Name))
+		buckets[key] = append(buckets[key], c)
+	}
+	out := []companyDuplicateGroup{}
+	for key, variants := range buckets {
+		if len(variants) < 2 {
+			continue
+		}
+		out = append(out, companyDuplicateGroup{
+			Canonical: key,
+			Variants:  variants,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Canonical < out[j].Canonical
+	})
+	return out
 }
 
 func (s *server) withCORS(next http.Handler) http.Handler {

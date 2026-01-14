@@ -279,6 +279,39 @@ func (s *SQLStore) UpsertMaintainerRefCache(cache *model.MaintainerRefCache) err
 	return s.db.Save(cache).Error
 }
 
+// MergeCompanies reassigns all maintainers from fromID to toID and deletes the source company.
+func (s *SQLStore) MergeCompanies(fromID, toID uint) error {
+	if fromID == toID {
+		return fmt.Errorf("fromID and toID must differ")
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		// Ensure target exists.
+		var target model.Company
+		if err := tx.First(&target, toID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("target company %d not found", toID)
+			}
+			return err
+		}
+		// Ensure source exists.
+		var source model.Company
+		if err := tx.First(&source, fromID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("source company %d not found", fromID)
+			}
+			return err
+		}
+
+		if err := tx.Model(&model.Maintainer{}).Where("company_id = ?", fromID).Update("company_id", toID).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&model.Company{}, fromID).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
 // GetMaintainerMapByEmail returns a map of Maintainers keyed by email address
 func (s *SQLStore) GetMaintainerMapByEmail() (map[string]model.Maintainer, error) {
 	var maintainers []model.Maintainer
