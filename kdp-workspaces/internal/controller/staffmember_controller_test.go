@@ -56,11 +56,11 @@ func TestAnnotationConstants(t *testing.T) {
 func TestSyncStatusValues(t *testing.T) {
 	// Test sync status value logic
 	tests := []struct {
-		name             string
-		totalWorkspaces  int
-		successCount     int
-		expectedStatus   string
-		description      string
+		name            string
+		totalWorkspaces int
+		successCount    int
+		expectedStatus  string
+		description     string
 	}{
 		{
 			name:            "all workspaces success",
@@ -117,23 +117,23 @@ func TestSyncStatusValues(t *testing.T) {
 func TestOIDCSubjectPrefix(t *testing.T) {
 	// Test that OIDC prefix is correctly applied to email addresses
 	tests := []struct {
-		name           string
-		email          string
+		name            string
+		email           string
 		expectedSubject string
 	}{
 		{
-			name:           "standard email",
-			email:          "user@example.com",
+			name:            "standard email",
+			email:           "user@example.com",
 			expectedSubject: "oidc:user@example.com",
 		},
 		{
-			name:           "email with plus",
-			email:          "user+test@example.com",
+			name:            "email with plus",
+			email:           "user+test@example.com",
 			expectedSubject: "oidc:user+test@example.com",
 		},
 		{
-			name:           "organizational email",
-			email:          "wojciech.barczynski@kubermatic.com",
+			name:            "organizational email",
+			email:           "wojciech.barczynski@kubermatic.com",
 			expectedSubject: "oidc:wojciech.barczynski@kubermatic.com",
 		},
 	}
