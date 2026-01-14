@@ -8,6 +8,7 @@ import MaintainerEditCard, {
   CompanyOption,
   MaintainerEditDraft,
 } from "@/components/MaintainerEditCard";
+import CompanyCreateModal from "@/components/CompanyCreateModal";
 import styles from "./page.module.css";
 
 type MaintainerDetail = {
@@ -19,7 +20,7 @@ type MaintainerDetail = {
   status: string;
   companyId?: number | null;
   company?: string;
-  projects: string[];
+  projects: { id: number; name: string }[];
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
@@ -51,7 +52,10 @@ const maintainerDataHasChanged = (
     return true;
   }
   for (let index = 0; index < current.projects.length; index += 1) {
-    if (current.projects[index] !== next.projects[index]) {
+    if (
+      current.projects[index].id !== next.projects[index].id ||
+      current.projects[index].name !== next.projects[index].name
+    ) {
       return true;
     }
   }
@@ -69,6 +73,11 @@ export default function MaintainerPage() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
+  const [companyDraftName, setCompanyDraftName] = useState("");
+  const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
+  const [companySaveStatus, setCompanySaveStatus] = useState<"idle" | "saving">("idle");
+  const [companySaveError, setCompanySaveError] = useState<string | null>(null);
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const maintainerId = params?.id;
@@ -119,7 +128,7 @@ export default function MaintainerPage() {
         if (alive && maintainerDataHasChanged(maintainer, data)) {
           setMaintainer(data);
         }
-      } catch (err) {
+      } catch {
         if (alive && error !== "Unable to load maintainer") {
           setError("Unable to load maintainer");
         }
@@ -142,7 +151,7 @@ export default function MaintainerPage() {
         window.clearInterval(intervalId);
       }
     };
-  }, [bffBaseUrl, error, isEditing, maintainer, maintainerId, pollIntervalMs, router]);
+  }, [apiBaseUrl, error, isEditing, maintainer, maintainerId, pollIntervalMs, router]);
 
   useEffect(() => {
     let alive = true;
@@ -257,6 +266,80 @@ export default function MaintainerPage() {
     }
   };
 
+  const handleCreateCompany = async () => {
+    const trimmed = companyDraftName.trim();
+    if (!trimmed) {
+      setCompanySaveError("Company name is required");
+      return;
+    }
+    if (selectedCompanyId) {
+      setEditDraft((prev) =>
+        prev ? { ...prev, companyId: selectedCompanyId } : prev
+      );
+      setIsCompanyModalOpen(false);
+      setCompanySaveError(null);
+      return;
+    }
+    setCompanySaveStatus("saving");
+    setCompanySaveError(null);
+    try {
+      const response = await fetch(`${apiBaseUrl}/companies`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (response.status === 409) {
+        setCompanySaveError("Company already exists");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`unexpected status ${response.status}`);
+      }
+      const created = (await response.json()) as CompanyOption;
+      setCompanies((prev) =>
+        [...prev, created].sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setEditDraft((prev) =>
+        prev ? { ...prev, companyId: created.id } : prev
+      );
+      setCompanyDraftName("");
+      setIsCompanyModalOpen(false);
+    } catch {
+      setCompanySaveError("Unable to add company");
+    } finally {
+      setCompanySaveStatus("idle");
+    }
+  };
+
+  const companySuggestions = useMemo(() => {
+    const query = companyDraftName.trim().toLowerCase();
+    if (query.length < 2) {
+      return [];
+    }
+    return companies
+      .filter((company) => company.name.toLowerCase().includes(query))
+      .slice(0, 8);
+  }, [companies, companyDraftName]);
+
+  const handleCompanyDraftChange = (next: string) => {
+    setCompanyDraftName(next);
+    const trimmed = next.trim().toLowerCase();
+    if (!trimmed) {
+      setSelectedCompanyId(null);
+      return;
+    }
+    const selected = companies.find((company) => company.id === selectedCompanyId);
+    if (!selected || selected.name.toLowerCase() !== trimmed) {
+      setSelectedCompanyId(null);
+    }
+  };
+
+  const handleSelectCompany = (company: CompanyOption) => {
+    setCompanyDraftName(company.name);
+    setSelectedCompanyId(company.id);
+  };
+
   return (
     <AppShell>
       <div className={styles.page}>
@@ -271,6 +354,7 @@ export default function MaintainerPage() {
               isDirty={isDirty}
               saveStatus={saveStatus}
               saveError={saveError}
+              disableCompanyAdd={companySaveStatus === "saving"}
               onEdit={() => {
                 setIsEditing(true);
                 setSaveError(null);
@@ -287,6 +371,28 @@ export default function MaintainerPage() {
               }}
               onChange={(next) => setEditDraft(next)}
               onSave={handleSave}
+              onAddCompany={() => {
+                setCompanyDraftName("");
+                setSelectedCompanyId(null);
+                setCompanySaveError(null);
+                setIsCompanyModalOpen(true);
+              }}
+            />
+          )}
+          {canEdit && isCompanyModalOpen && (
+            <CompanyCreateModal
+              name={companyDraftName}
+              error={companySaveError}
+              isSaving={companySaveStatus === "saving"}
+              suggestions={companySuggestions}
+              selectedCompanyId={selectedCompanyId}
+              onChange={handleCompanyDraftChange}
+              onSelectCompany={handleSelectCompany}
+              onClose={() => {
+                setIsCompanyModalOpen(false);
+                setCompanySaveError(null);
+              }}
+              onSubmit={handleCreateCompany}
             />
           )}
           {maintainer && (

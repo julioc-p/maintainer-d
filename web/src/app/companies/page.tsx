@@ -52,7 +52,7 @@ export default function CompaniesPage() {
           setCompanies(allData.sort((a, b) => a.name.localeCompare(b.name)));
           setDups(dupData);
         }
-      } catch (err) {
+      } catch {
         if (alive) setError("Unable to load companies");
       } finally {
         if (alive) setStatus("ready");
@@ -90,7 +90,7 @@ export default function CompaniesPage() {
       setDups(dupData);
       setMergeFrom(null);
       setMergeTo(null);
-    } catch (err) {
+    } catch {
       setError("Merge failed");
     } finally {
       setStatus("ready");

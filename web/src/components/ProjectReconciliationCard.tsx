@@ -91,16 +91,6 @@ const formatDate = (value?: string | null) => {
   return `${weekday} ${month} ${day} ${year}`;
 };
 
-const formatValue = (value?: string | null) => {
-  if (!value) {
-    return "—";
-  }
-  const trimmed = value.trim();
-  return trimmed === "" ? "—" : trimmed;
-};
-
-const isLink = (value: string) => /^https?:\/\//i.test(value);
-
 const maintainerRefSchema = {
   ...defaultSchema,
   tagNames: [
@@ -133,10 +123,7 @@ export default function ProjectReconciliationCard({
   refLines,
   refOnlyGitHub,
   companyOptions = [],
-  onboardingIssue,
-  mailingList,
   maintainers,
-  services,
   createdAt,
   updatedAt,
   onRefresh,
@@ -146,8 +133,6 @@ export default function ProjectReconciliationCard({
   onUpdateMaintainerRef,
   onBulkStatusChange,
 }: ProjectReconciliationCardProps) {
-  const normalizedOnboardingIssue = formatValue(onboardingIssue);
-  const normalizedMailingList = formatValue(mailingList);
   const refStatus = maintainerRefStatus?.status || "missing";
   const refCheckedAt = maintainerRefStatus?.checkedAt || null;
   const refUrl = maintainerRefStatus?.url || maintainerRef || "";
@@ -155,11 +140,10 @@ export default function ProjectReconciliationCard({
   const refMatchCount = maintainers.filter((maintainer) => maintainer.inMaintainerRef).length;
   const refMissingCount = maintainers.length - refMatchCount;
   const refOnlyCount = refOnlyGitHub.length;
-  const refLinesMap = refLines ?? {};
   const normalizedRefLines = useMemo(() => {
-    const entries = Object.entries(refLinesMap || {}).map(([key, value]) => [key.toLowerCase(), value]);
+    const entries = Object.entries(refLines ?? {}).map(([key, value]) => [key.toLowerCase(), value]);
     return Object.fromEntries(entries) as Record<string, string>;
-  }, [refLinesMap]);
+  }, [refLines]);
 
   const [selectedMaintainers, setSelectedMaintainers] = useState<Set<number>>(new Set());
   const toggleSelected = (id: number) => {
@@ -333,51 +317,12 @@ export default function ProjectReconciliationCard({
   const [refInput, setRefInput] = useState("");
   const [refSaving, setRefSaving] = useState(false);
   const [refError, setRefError] = useState<string | null>(null);
-  const [legacyOpen, setLegacyOpen] = useState(true);
   const [activeSection, setActiveSection] = useState<string>("legacy");
   useEffect(() => {
     if (isRefBroken && refInput.trim() === "" && refUrl) {
       setRefInput(refUrl);
     }
   }, [isRefBroken, refInput, refUrl]);
-
-  const projectDetails = (
-    <div className={styles.section}>
-      <h3 className={styles.subSectionTitle}>Project Details</h3>
-      <div className={styles.detailRow}>
-        <span className={styles.detailLabel}>Onboarding Issue</span>
-        {normalizedOnboardingIssue !== "—" && isLink(normalizedOnboardingIssue) ? (
-          <a className={styles.link} href={normalizedOnboardingIssue} target="_blank" rel="noreferrer">
-            {normalizedOnboardingIssue}
-          </a>
-        ) : (
-          <span>{normalizedOnboardingIssue}</span>
-        )}
-      </div>
-      <div className={styles.detailRow}>
-        <span className={styles.detailLabel}>Mailing List</span>
-        <span>{normalizedMailingList}</span>
-      </div>
-    </div>
-  );
-
-  const servicesSection = (
-    <div className={styles.section}>
-      <h3 className={styles.subSectionTitle}>Services</h3>
-      {services.length === 0 ? (
-        <div className={styles.empty}>No services found.</div>
-      ) : (
-        <ul className={styles.list}>
-          {services.map((service) => (
-            <li key={service.id} className={styles.listItem}>
-              <span>{service.name || "Unknown service"}</span>
-              {service.description ? <span className={styles.secondary}>{service.description}</span> : null}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
 
   const dotProjectSection = (
     <div className={styles.section}>
@@ -456,7 +401,7 @@ export default function ProjectReconciliationCard({
                       if (onRefresh) {
                         onRefresh();
                       }
-                    } catch (err) {
+                    } catch {
                       setRefError("Unable to update project admin file.");
                     } finally {
                       setRefSaving(false);
@@ -503,7 +448,7 @@ export default function ProjectReconciliationCard({
                       if (onRefresh) {
                         onRefresh();
                       }
-                    } catch (err) {
+                    } catch {
                       setRefError("Unable to update project admin file.");
                     } finally {
                       setRefSaving(false);
@@ -589,7 +534,7 @@ export default function ProjectReconciliationCard({
       case "legacy":
         return (
           <>
-            {legacyOpen ? legacyContent : null}
+            {legacyContent}
             <ProjectDiffControl
               status={refStatus}
               checkedAt={refCheckedAt}

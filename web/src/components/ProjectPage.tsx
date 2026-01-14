@@ -315,7 +315,7 @@ export default function ProjectReconciliationCard({
                           if (onRefresh) {
                             onRefresh();
                           }
-                        } catch (err) {
+                        } catch {
                           setRefError("Unable to update project admin file.");
                         } finally {
                           setRefSaving(false);
@@ -364,7 +364,7 @@ export default function ProjectReconciliationCard({
                           if (onRefresh) {
                             onRefresh();
                           }
-                        } catch (err) {
+                        } catch {
                           setRefError("Unable to update project admin file.");
                         } finally {
                           setRefSaving(false);

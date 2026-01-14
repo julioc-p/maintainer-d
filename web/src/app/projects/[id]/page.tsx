@@ -178,7 +178,7 @@ export default function ProjectPage() {
           projectRef.current = data;
           setProject(data);
         }
-      } catch (err) {
+      } catch {
         if (alive) {
           setError((prev) => (prev === "Unable to load project" ? prev : "Unable to load project"));
         }
@@ -272,7 +272,7 @@ export default function ProjectPage() {
         projectRef.current = data;
         setProject(data);
       }
-    } catch (err) {
+    } catch {
       setError((prev) => (prev === "Unable to load project" ? prev : "Unable to load project"));
     } finally {
       setStatus("ready");

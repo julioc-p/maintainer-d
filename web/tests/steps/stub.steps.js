@@ -29,6 +29,7 @@ Given("I am signed in as {string} {string}", async function (_role, login) {
 });
 
 Given("I am signed in as a maintainer for project {string}", async function (_project) {
+  void _project;
   const login = process.env.TEST_MAINTAINER_LOGIN || "antonio-example";
   await this.page.goto(
     `${this.bffBaseUrl}/auth/test-login?login=${encodeURIComponent(login)}`,

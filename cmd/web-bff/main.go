@@ -769,18 +769,23 @@ func (s *server) handleProjectMaintainerRefUpdate(w http.ResponseWriter, r *http
 }
 
 type maintainerDetailResponse struct {
-	ID          uint     `json:"id"`
-	Name        string   `json:"name"`
-	Email       string   `json:"email"`
-	GitHub      string   `json:"github"`
-	GitHubEmail string   `json:"githubEmail"`
-	Status      string   `json:"status"`
-	CompanyID   *uint    `json:"companyId,omitempty"`
-	Company     string   `json:"company,omitempty"`
-	Projects    []string `json:"projects"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-	DeletedAt   *time.Time `json:"deletedAt,omitempty"`
+	ID          uint                        `json:"id"`
+	Name        string                      `json:"name"`
+	Email       string                      `json:"email"`
+	GitHub      string                      `json:"github"`
+	GitHubEmail string                      `json:"githubEmail"`
+	Status      string                      `json:"status"`
+	CompanyID   *uint                       `json:"companyId,omitempty"`
+	Company     string                      `json:"company,omitempty"`
+	Projects    []maintainerProjectResponse `json:"projects"`
+	CreatedAt   time.Time                   `json:"createdAt"`
+	UpdatedAt   time.Time                   `json:"updatedAt"`
+	DeletedAt   *time.Time                  `json:"deletedAt,omitempty"`
+}
+
+type maintainerProjectResponse struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
 }
 
 func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
@@ -814,9 +819,12 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		projects := make([]string, 0, len(maintainer.Projects))
+		projects := make([]maintainerProjectResponse, 0, len(maintainer.Projects))
 		for _, project := range maintainer.Projects {
-			projects = append(projects, project.Name)
+			projects = append(projects, maintainerProjectResponse{
+				ID:   project.ID,
+				Name: project.Name,
+			})
 		}
 
 		response := maintainerDetailResponse{
@@ -872,9 +880,12 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		projects := make([]string, 0, len(updated.Projects))
+		projects := make([]maintainerProjectResponse, 0, len(updated.Projects))
 		for _, project := range updated.Projects {
-			projects = append(projects, project.Name)
+			projects = append(projects, maintainerProjectResponse{
+				ID:   project.ID,
+				Name: project.Name,
+			})
 		}
 
 		response := maintainerDetailResponse{

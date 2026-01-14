@@ -308,7 +308,7 @@
 }
 
 .link {
-  color: var(--md-link, #0b3d2e);
+  color: #d62293;
   font-weight: 600;
   text-decoration: none;
 }

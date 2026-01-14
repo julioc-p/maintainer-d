@@ -16,7 +16,7 @@ body {
   --md-surface-strong: rgba(15, 23, 42, 0.08);
   --md-chip-bg: rgba(15, 23, 42, 0.12);
   --md-chip-text: #0b1220;
-  --md-link: #0b3d2e;
+  --md-link: #d62293;
   --md-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
   --md-modal-backdrop: rgba(15, 23, 42, 0.45);
   --md-modal-shadow: 0 20px 40px rgba(15, 23, 42, 0.2);
@@ -34,7 +34,7 @@ body {
   --md-surface-strong: rgba(255, 255, 255, 0.1);
   --md-chip-bg: rgba(255, 255, 255, 0.14);
   --md-chip-text: #f2f4f8;
-  --md-link: #7ee0b2;
+  --md-link: #d62293;
   --md-shadow: 0 12px 24px rgba(0, 0, 0, 0.45);
   --md-modal-backdrop: rgba(10, 12, 16, 0.7);
   --md-modal-shadow: 0 24px 48px rgba(0, 0, 0, 0.6);
@@ -55,6 +55,6 @@ body {
 }
 
 a {
-  color: inherit;
+  color: var(--md-link);
   text-decoration: none;
 }

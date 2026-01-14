@@ -25,9 +25,6 @@ export default function AppShell({
 }: AppShellProps) {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [meStatus, setMeStatus] = useState<"idle" | "loading" | "ready">(
-    "idle"
-  );
   const devLoginAttemptedRef = useRef(false);
 
   const bffBaseUrl = useMemo(() => {
@@ -54,16 +51,6 @@ export default function AppShell({
   }, [bffBaseUrl]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const stored = window.localStorage.getItem("md_theme");
-    if (stored === "light" || stored === "dark") {
-      setTheme(stored);
-    }
-  }, []);
-
-  useEffect(() => {
     if (typeof document === "undefined") {
       return;
     }
@@ -82,7 +69,6 @@ export default function AppShell({
     let alive = true;
     const devLogin = (process.env.NEXT_PUBLIC_DEV_AUTH_LOGIN || "").trim();
     const loadMe = async () => {
-      setMeStatus("loading");
       try {
         const response = await fetch(`${apiBaseUrl}/me`, {
           credentials: "include",
@@ -106,7 +92,7 @@ export default function AppShell({
                   await loadMe();
                   return;
                 }
-              } catch (error) {
+              } catch {
                 // Ignore dev login failures; fall back to unauthenticated state.
               }
             }
@@ -121,21 +107,18 @@ export default function AppShell({
         if (alive) {
           setMe(data);
         }
-      } catch (error) {
+      } catch {
         if (alive) {
           setMe(null);
         }
       } finally {
-        if (alive) {
-          setMeStatus("ready");
-        }
       }
     };
     void loadMe();
     return () => {
       alive = false;
     };
-  }, [bffBaseUrl]);
+  }, [apiBaseUrl, authBaseUrl]);
 
   const handleLogout = async () => {
     try {
@@ -167,11 +150,14 @@ export default function AppShell({
             <button
               className={styles.themeToggle}
               type="button"
+              suppressHydrationWarning
               onClick={() =>
                 setTheme((current) => (current === "light" ? "dark" : "light"))
               }
             >
-              {theme === "light" ? "Dark mode" : "Light mode"}
+              <span suppressHydrationWarning>
+                {theme === "light" ? "Dark mode" : "Light mode"}
+              </span>
             </button>
             {me ? (
               <Dropdown

@@ -84,6 +84,43 @@
   color: var(--md-card-text-strong, #0b1220);
 }
 
+.detailValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.link {
+  color: #d62293;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.copyButton {
+  border: 0;
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+  padding: 4px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.copyButton:hover {
+  background: rgba(37, 99, 235, 0.2);
+}
+
+.copyIcon {
+  width: 14px;
+  height: 14px;
+}
+
 .dateLine {
   display: inline-flex;
   align-items: baseline;

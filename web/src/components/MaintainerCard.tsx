@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Card } from "clo-ui/components/Card";
 import styles from "./MaintainerCard.module.css";
 
@@ -10,7 +11,7 @@ type MaintainerCardProps = {
   githubEmail: string;
   status: string;
   company?: string;
-  projects: string[];
+  projects: Array<{ id: number; name: string } | string>;
   createdAt?: string;
   updatedAt?: string;
   updatedNotice?: string | null;
@@ -79,12 +80,27 @@ export default function MaintainerCard({
   updatedAt,
   updatedNotice,
 }: MaintainerCardProps) {
+  const displayName = name || "Unknown maintainer";
+  const hasEmail = email && email !== "—";
+  const githubHandle = github && github !== "—" ? github : "";
+  const handleCopyEmail = async () => {
+    if (!hasEmail) {
+      return;
+    }
+    const value = `${displayName} <${email}>`;
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      // no-op: clipboard might be unavailable
+    }
+  };
+
   return (
     <Card hoverable={false} className={styles.card}>
       <div className={styles.content}>
         <div className={styles.header}>
           <div>
-            <h1 className={styles.name}>{name || "Unknown maintainer"}</h1>
+            <h1 className={styles.name}>{displayName}</h1>
             {company ? <p className={styles.company}>{company}</p> : null}
           </div>
           <div className={styles.statusStack}>
@@ -99,15 +115,54 @@ export default function MaintainerCard({
           <h2 className={styles.sectionTitle}>Contact</h2>
           <div className={styles.detailRow}>
             <span className={styles.detailLabel}>Email</span>
-            <span>{email || "—"}</span>
+            <span className={styles.detailValue}>
+              {email || "—"}
+              {hasEmail ? (
+                <button
+                  className={styles.copyButton}
+                  type="button"
+                  onClick={handleCopyEmail}
+                  aria-label="Copy email"
+                  title="Copy email"
+                >
+                  <svg
+                    className={styles.copyIcon}
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M8 8.5A2.5 2.5 0 0 1 10.5 6h7A2.5 2.5 0 0 1 20 8.5v7a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 8 15.5v-7ZM10.5 7.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-7a1 1 0 0 0-1-1h-7Z"
+                      fill="currentColor"
+                    />
+                    <path
+                      d="M4.5 9.5A2.5 2.5 0 0 1 7 7h1.5v1.5H7a1 1 0 0 0-1 1v7A1 1 0 0 0 7 17h7a1 1 0 0 0 1-1v-1.5H16V16a2.5 2.5 0 0 1-2.5 2.5H7A2.5 2.5 0 0 1 4.5 16v-6.5Z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </button>
+              ) : null}
+            </span>
           </div>
           <div className={styles.detailRow}>
             <span className={styles.detailLabel}>GitHub</span>
-            <span>{github || "—"}</span>
+            <span className={styles.detailValue}>
+              {githubHandle ? (
+                <a
+                  className={styles.link}
+                  href={`https://github.com/${githubHandle}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {githubHandle}
+                </a>
+              ) : (
+                "—"
+              )}
+            </span>
           </div>
           <div className={styles.detailRow}>
             <span className={styles.detailLabel}>GitHub Email</span>
-            <span>{githubEmail || "—"}</span>
+            <span className={styles.detailValue}>{githubEmail || "—"}</span>
           </div>
         </div>
 
@@ -117,9 +172,22 @@ export default function MaintainerCard({
             <div className={styles.empty}>No projects found.</div>
           ) : (
             <ul className={styles.projectList}>
-              {projects.map((project) => (
-                <li key={project}>{project}</li>
-              ))}
+              {projects.map((project, index) => {
+                const item =
+                  typeof project === "string"
+                    ? { id: null, name: project }
+                    : project;
+                if (item.id) {
+                  return (
+                    <li key={item.id}>
+                      <Link className={styles.link} href={`/projects/${item.id}`}>
+                        {item.name}
+                      </Link>
+                    </li>
+                  );
+                }
+                return <li key={`${item.name}-${index}`}>{item.name}</li>;
+              })}
             </ul>
           )}
         </div>
