@@ -775,11 +775,19 @@ type maintainerDetailResponse struct {
 	GitHub      string   `json:"github"`
 	GitHubEmail string   `json:"githubEmail"`
 	Status      string   `json:"status"`
+	CompanyID   *uint    `json:"companyId,omitempty"`
 	Company     string   `json:"company,omitempty"`
 	Projects    []string `json:"projects"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+	DeletedAt   *time.Time `json:"deletedAt,omitempty"`
 }
 
 func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	id, err := parseIDParam(r.URL.Path, "/api/maintainers/")
 	if err != nil {
 		http.Error(w, "invalid maintainer id", http.StatusBadRequest)
@@ -794,38 +802,119 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logger.Printf("web-bff: maintainer lookup id=%d path=%s user=%s role=%s", id, r.URL.Path, login, role)
 
-	var maintainer model.Maintainer
-	if err := s.store.DB().
-		Preload("Company").
-		Preload("Projects").
-		First(&maintainer, id).Error; err != nil {
-		s.logger.Printf("web-bff: maintainer not found id=%d path=%s user=%s role=%s err=%v", id, r.URL.Path, login, role, err)
-		http.Error(w, "maintainer not found", http.StatusNotFound)
+	switch r.Method {
+	case http.MethodGet:
+		var maintainer model.Maintainer
+		if err := s.store.DB().
+			Preload("Company").
+			Preload("Projects").
+			First(&maintainer, id).Error; err != nil {
+			s.logger.Printf("web-bff: maintainer not found id=%d path=%s user=%s role=%s err=%v", id, r.URL.Path, login, role, err)
+			http.Error(w, "maintainer not found", http.StatusNotFound)
+			return
+		}
+
+		projects := make([]string, 0, len(maintainer.Projects))
+		for _, project := range maintainer.Projects {
+			projects = append(projects, project.Name)
+		}
+
+		response := maintainerDetailResponse{
+			ID:          maintainer.ID,
+			Name:        maintainer.Name,
+			Email:       normalizeValue(maintainer.Email, "EMAIL_MISSING"),
+			GitHub:      normalizeValue(maintainer.GitHubAccount, "GITHUB_MISSING"),
+			GitHubEmail: normalizeValue(maintainer.GitHubEmail, "GITHUB_MISSING"),
+			Status:      string(maintainer.MaintainerStatus),
+			Projects:    projects,
+			CreatedAt:   maintainer.CreatedAt,
+			UpdatedAt:   maintainer.UpdatedAt,
+		}
+		if maintainer.DeletedAt.Valid {
+			deleted := maintainer.DeletedAt.Time
+			response.DeletedAt = &deleted
+		}
+		if maintainer.CompanyID != nil {
+			response.CompanyID = maintainer.CompanyID
+		}
+		if maintainer.Company.Name != "" {
+			response.Company = maintainer.Company.Name
+		}
+
+		w.Header().Set(headerContentType, contentTypeJSON)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			s.logger.Printf("web-bff: handleMaintainer encode error: %v", err)
+		}
+		return
+	case http.MethodPatch, http.MethodPut:
+		if session == nil || session.Role != roleStaff {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		var req maintainerUpdateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		status := model.MaintainerStatus(strings.TrimSpace(req.Status))
+		if !status.IsValid() {
+			http.Error(w, "invalid status", http.StatusBadRequest)
+			return
+		}
+		updated, err := s.store.UpdateMaintainerDetails(id, req.Email, req.GitHub, status, req.CompanyID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				http.Error(w, "maintainer not found", http.StatusNotFound)
+				return
+			}
+			s.logger.Printf("web-bff: update maintainer failed id=%d err=%v", id, err)
+			http.Error(w, "failed to update maintainer", http.StatusInternalServerError)
+			return
+		}
+
+		projects := make([]string, 0, len(updated.Projects))
+		for _, project := range updated.Projects {
+			projects = append(projects, project.Name)
+		}
+
+		response := maintainerDetailResponse{
+			ID:          updated.ID,
+			Name:        updated.Name,
+			Email:       normalizeValue(updated.Email, "EMAIL_MISSING"),
+			GitHub:      normalizeValue(updated.GitHubAccount, "GITHUB_MISSING"),
+			GitHubEmail: normalizeValue(updated.GitHubEmail, "GITHUB_MISSING"),
+			Status:      string(updated.MaintainerStatus),
+			Projects:    projects,
+			CreatedAt:   updated.CreatedAt,
+			UpdatedAt:   updated.UpdatedAt,
+		}
+		if updated.DeletedAt.Valid {
+			deleted := updated.DeletedAt.Time
+			response.DeletedAt = &deleted
+		}
+		if updated.CompanyID != nil {
+			response.CompanyID = updated.CompanyID
+		}
+		if updated.Company.Name != "" {
+			response.Company = updated.Company.Name
+		}
+
+		w.Header().Set(headerContentType, contentTypeJSON)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			s.logger.Printf("web-bff: handleMaintainer update encode error: %v", err)
+		}
+		return
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+}
 
-	projects := make([]string, 0, len(maintainer.Projects))
-	for _, project := range maintainer.Projects {
-		projects = append(projects, project.Name)
-	}
-
-	response := maintainerDetailResponse{
-		ID:          maintainer.ID,
-		Name:        maintainer.Name,
-		Email:       normalizeValue(maintainer.Email, "EMAIL_MISSING"),
-		GitHub:      normalizeValue(maintainer.GitHubAccount, "GITHUB_MISSING"),
-		GitHubEmail: normalizeValue(maintainer.GitHubEmail, "GITHUB_MISSING"),
-		Status:      string(maintainer.MaintainerStatus),
-		Projects:    projects,
-	}
-	if maintainer.Company.Name != "" {
-		response.Company = maintainer.Company.Name
-	}
-
-	w.Header().Set(headerContentType, contentTypeJSON)
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		s.logger.Printf("web-bff: handleMaintainer encode error: %v", err)
-	}
+type maintainerUpdateRequest struct {
+	Email     string `json:"email"`
+	GitHub    string `json:"github"`
+	Status    string `json:"status"`
+	CompanyID *uint  `json:"companyId"`
 }
 
 type maintainerStatusUpdateRequest struct {

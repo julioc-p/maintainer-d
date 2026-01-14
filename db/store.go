@@ -28,6 +28,7 @@ type Store interface {
 	UpdateMaintainerStatus(maintainerID uint, status model.MaintainerStatus) error
 	UpdateMaintainersStatus(ids []uint, status model.MaintainerStatus) error
 	UpdateMaintainerGitHubEmail(maintainerID uint, githubEmail string) error
+	UpdateMaintainerDetails(maintainerID uint, email, github string, status model.MaintainerStatus, companyID *uint) (*model.Maintainer, error)
 	ListCompanies() ([]model.Company, error)
 	ListStaffMembers() ([]model.StaffMember, error)
 	GetMaintainerRefCache(projectID uint) (*model.MaintainerRefCache, error)
