@@ -65,6 +65,8 @@ func main() {
 	var kcpConfigMapNamespace string
 	var kcpSecretName string
 	var kcpSecretNamespace string
+	// Staff member configuration
+	var staffNamespace string
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -91,6 +93,8 @@ func main() {
 		"Name of the Secret containing kcp kubeconfig")
 	flag.StringVar(&kcpSecretNamespace, "kcp-secret-namespace", "kdp-workspaces-system",
 		"Namespace of the Secret containing kcp kubeconfig")
+	flag.StringVar(&staffNamespace, "staff-namespace", "maintainerd",
+		"Namespace where StaffMember resources are located")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -200,6 +204,20 @@ func main() {
 		KCPSecretNamespace:    kcpSecretNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Project")
+		os.Exit(1)
+	}
+
+	// Setup StaffMember controller
+	if err = (&controller.StaffMemberReconciler{
+		Client:                mgr.GetClient(),
+		Scheme:                mgr.GetScheme(),
+		KCPConfigMapName:      kcpConfigMapName,
+		KCPConfigMapNamespace: kcpConfigMapNamespace,
+		KCPSecretName:         kcpSecretName,
+		KCPSecretNamespace:    kcpSecretNamespace,
+		StaffMemberNamespace:  staffNamespace,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "StaffMember")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
