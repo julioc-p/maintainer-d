@@ -17,6 +17,8 @@ WEB_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web:$(TAG)
 WEB_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web:latest
 WEB_BFF_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web-bff:$(TAG)
 WEB_BFF_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web-bff:latest
+WEB_IMAGE_REPO ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web
+WEB_BFF_IMAGE_REPO ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web-bff
 WHOAMI=$(shell whoami)
 CONTAINER_TOOL ?= podman
 
@@ -718,6 +720,15 @@ web-image-set:
 	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) \
 		set image deploy/maintainerd-web web=$(WEB_IMAGE_REPO):$(TAG)
 
+.PHONY: web-bff-image-set
+web-bff-image-set:
+	@if [ -z "$(TAG)" ]; then \
+		echo "Usage: make web-bff-image-set TAG=<tag>"; exit 1; \
+	fi
+	@echo "Setting maintainerd-web-bff image to $(WEB_BFF_IMAGE_REPO):$(TAG) [ns=$(NAMESPACE)]"
+	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) \
+		set image deploy/maintainerd-web-bff web-bff=$(WEB_BFF_IMAGE_REPO):$(TAG)
+
 # Convenience combo target
 .PHONY: secrets
 secrets: env apply-env apply-creds
@@ -728,6 +739,16 @@ secrets: env apply-env apply-creds
 print: env
 	@echo "Keys in $(ENVOUT):"
 	@cut -d= -f1 $(ENVOUT)
+
+.PHONY: images-show
+images-show:
+	@echo "Image repositories:"
+	@echo "  maintainerd        $(IMAGE)"
+	@echo "  maintainerd-sync   $(SYNC_IMAGE)"
+	@echo "  maintainerd-sanitize $(SANITIZE_IMAGE)"
+	@echo "  maintainerd-migrate  $(MIGRATE_IMAGE)"
+	@echo "  maintainerd-web      $(WEB_IMAGE)"
+	@echo "  maintainerd-web-bff  $(WEB_BFF_IMAGE)"
 
 .PHONY: clean-env
 clean-env:
