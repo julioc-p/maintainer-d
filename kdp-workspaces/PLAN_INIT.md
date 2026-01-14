@@ -724,6 +724,10 @@ The eventual consistency gap (workspace created → staff access added shortly a
 
 ## Implementation Plan (Solution 2)
 
+**Implementation Strategy:** Build and test the MVP implementation (Phases 1-5) first, then optimize (Phase 6).
+
+The initial implementation uses a "rebuild-all" reconciliation strategy for simplicity and correctness. This ensures the system works correctly before adding complexity. Performance optimizations will be added in Phase 6 after the MVP is validated in production.
+
 ### Phase 1: KCP Client Extensions
 
 **Tasks:**
@@ -894,6 +898,533 @@ If currently deployed:
 
 ---
 
+## Phase 6: Post-MVP Optimizations (After Testing)
+
+**⚠️ IMPORTANT:** These optimizations should ONLY be implemented AFTER the MVP (Phases 1-5) is deployed, tested, and validated in production.
+
+### Why Optimize Later?
+
+The initial implementation (Phases 1-5) uses a "rebuild-all" reconciliation strategy. While less efficient, this approach is:
+- ✅ **Simpler** to implement and reason about
+- ✅ **Self-healing** - rebuilds complete state every time
+- ✅ **Correct** - always converges to desired state
+- ✅ **Easier to test** - fewer code paths and edge cases
+
+After validating correctness in production, the following optimizations improve efficiency and responsiveness:
+
+| Optimization | Addresses | Complexity | Impact |
+|--------------|-----------|------------|--------|
+| **A: Incremental Updates** | Inefficiency (O(staff × workspaces) → O(workspaces)) | High (3 code paths + finalizers) | 500× faster for staff changes |
+| **B: Workspace Watch** | Critical gap (new workspaces don't get access) | Medium (cross-cluster watch) | Eliminates gap entirely |
+
+### Trade-offs Summary
+
+**MVP Approach (Phases 1-5):**
+- Simple, correct, self-healing
+- ❌ Inefficient for large deployments (500 staff × 240 workspaces)
+- ❌ Gap: new workspaces wait for next StaffMember change
+
+**Optimized Approach (Phase 6):**
+- ✅ 500× more efficient
+- ✅ No gap - immediate workspace access
+- ❌ More complex (6 code paths vs 1)
+- ❌ More edge cases to handle
+
+### Optimization A: Incremental Subject Updates
+
+**Current MVP Behavior:**
+- Every StaffMember change triggers fetching ALL staff members and rebuilding complete subject lists for ALL workspaces
+- For 500 staff members and 240 workspaces, this is O(500 × 240) = 120,000 operations per change
+
+**Optimization Goal:**
+- Update only the changed staff member's subject in each workspace
+- Reduces to O(240) operations = 500× improvement
+
+**Implementation Details:**
+
+1. **Detect Event Type in Reconcile:**
+   ```go
+   func (r *StaffMemberReconciler) Reconcile(ctx context.Context,
+       req ctrl.Request) (ctrl.Result, error) {
+
+       logger := log.FromContext(ctx)
+
+       // Try to fetch the StaffMember
+       staffMember := &maintainerv1alpha1.StaffMember{}
+       err := r.Get(ctx, req.NamespacedName, staffMember)
+
+       if err != nil {
+           if errors.IsNotFound(err) {
+               // DELETE event - staff member was deleted
+               return r.handleStaffMemberDelete(ctx, req.Name)
+           }
+           return ctrl.Result{}, err
+       }
+
+       // CREATE or UPDATE event - staff member exists
+       return r.handleStaffMemberUpsert(ctx, staffMember)
+   }
+   ```
+
+2. **Handle Create/Update (Add/Update Single Subject):**
+   ```go
+   func (r *StaffMemberReconciler) handleStaffMemberUpsert(ctx context.Context,
+       staffMember *maintainerv1alpha1.StaffMember) (ctrl.Result, error) {
+
+       logger := log.FromContext(ctx)
+       email := staffMember.Spec.PrimaryEmail
+       if email == "" {
+           logger.Info("StaffMember has no email, skipping", "name", staffMember.Name)
+           return ctrl.Result{}, nil
+       }
+
+       subject := rbacv1.Subject{
+           Kind: "User",
+           Name: fmt.Sprintf("oidc:%s", email),
+       }
+
+       // Get KCP client (cached in reconciler)
+       kcpClient := r.kcpClient
+
+       // List managed workspaces
+       workspaces, err := kcpClient.ListManagedWorkspaces(ctx)
+       if err != nil {
+           return ctrl.Result{RequeueAfter: 30 * time.Second}, err
+       }
+
+       // Add/update this subject in each workspace
+       var reconcileErrors []error
+       for _, ws := range workspaces {
+           if err := kcpClient.AddSubjectToStaffBinding(ctx, ws.Name, subject); err != nil {
+               logger.Error(err, "Failed to add subject", "workspace", ws.Name)
+               reconcileErrors = append(reconcileErrors, err)
+           }
+       }
+
+       // Update StaffMember annotations
+       syncStatus := "success"
+       if len(reconcileErrors) > 0 {
+           syncStatus = "partial"
+       }
+       r.updateStaffMemberAnnotations(ctx, staffMember.Name, len(workspaces), syncStatus)
+
+       if len(reconcileErrors) > 0 {
+           return ctrl.Result{RequeueAfter: 30 * time.Second},
+               errors.NewAggregate(reconcileErrors)
+       }
+
+       return ctrl.Result{}, nil
+   }
+   ```
+
+3. **Handle Delete (Remove Single Subject):**
+   ```go
+   func (r *StaffMemberReconciler) handleStaffMemberDelete(ctx context.Context,
+       staffMemberName string) (ctrl.Result, error) {
+
+       logger := log.FromContext(ctx)
+
+       // Reconstruct email from name (assumes name format: email-domain.com)
+       // OR: Use a finalizer to cache the email before deletion
+       email := reconstructEmailFromName(staffMemberName)
+       if email == "" {
+           logger.Info("Cannot determine email from deleted StaffMember", "name", staffMemberName)
+           return ctrl.Result{}, nil
+       }
+
+       subject := rbacv1.Subject{
+           Kind: "User",
+           Name: fmt.Sprintf("oidc:%s", email),
+       }
+
+       // Get KCP client
+       kcpClient := r.kcpClient
+
+       // List managed workspaces
+       workspaces, err := kcpClient.ListManagedWorkspaces(ctx)
+       if err != nil {
+           return ctrl.Result{RequeueAfter: 30 * time.Second}, err
+       }
+
+       // Remove this subject from each workspace
+       var reconcileErrors []error
+       for _, ws := range workspaces {
+           if err := kcpClient.RemoveSubjectFromStaffBinding(ctx, ws.Name, subject); err != nil {
+               logger.Error(err, "Failed to remove subject", "workspace", ws.Name)
+               reconcileErrors = append(reconcileErrors, err)
+           }
+       }
+
+       if len(reconcileErrors) > 0 {
+           return ctrl.Result{RequeueAfter: 30 * time.Second},
+               errors.NewAggregate(reconcileErrors)
+       }
+
+       return ctrl.Result{}, nil
+   }
+   ```
+
+4. **New KCP Client Methods (kdp-workspaces/internal/kcp/rbac.go):**
+   ```go
+   // AddSubjectToStaffBinding adds or updates a single subject in the ClusterRoleBinding
+   func (c *Client) AddSubjectToStaffBinding(ctx context.Context,
+       workspaceName string, subject rbacv1.Subject) error {
+
+       // Get existing binding
+       binding, err := c.GetStaffBinding(ctx, workspaceName)
+       if err != nil {
+           if errors.IsNotFound(err) {
+               // Binding doesn't exist, create it with this subject
+               return c.CreateOrUpdateStaffBinding(ctx, workspaceName, []rbacv1.Subject{subject})
+           }
+           return err
+       }
+
+       // Check if subject already exists
+       found := false
+       for i, s := range binding.Subjects {
+           if s.Kind == subject.Kind && s.Name == subject.Name {
+               binding.Subjects[i] = subject // Update in case fields changed
+               found = true
+               break
+           }
+       }
+
+       if !found {
+           binding.Subjects = append(binding.Subjects, subject)
+       }
+
+       // Update annotations
+       binding.Annotations[AnnotationBindingLastSynced] = time.Now().Format(time.RFC3339)
+       binding.Annotations[AnnotationBindingStaffCount] = fmt.Sprintf("%d", len(binding.Subjects))
+
+       // Patch the binding
+       return c.patchStaffBinding(ctx, workspaceName, binding)
+   }
+
+   // RemoveSubjectFromStaffBinding removes a single subject from the ClusterRoleBinding
+   func (c *Client) RemoveSubjectFromStaffBinding(ctx context.Context,
+       workspaceName string, subject rbacv1.Subject) error {
+
+       // Get existing binding
+       binding, err := c.GetStaffBinding(ctx, workspaceName)
+       if err != nil {
+           if errors.IsNotFound(err) {
+               // Binding doesn't exist, nothing to remove
+               return nil
+           }
+           return err
+       }
+
+       // Filter out the subject
+       newSubjects := []rbacv1.Subject{}
+       for _, s := range binding.Subjects {
+           if !(s.Kind == subject.Kind && s.Name == subject.Name) {
+               newSubjects = append(newSubjects, s)
+           }
+       }
+
+       binding.Subjects = newSubjects
+
+       // Update annotations
+       binding.Annotations[AnnotationBindingLastSynced] = time.Now().Format(time.RFC3339)
+       binding.Annotations[AnnotationBindingStaffCount] = fmt.Sprintf("%d", len(binding.Subjects))
+
+       // Patch the binding
+       return c.patchStaffBinding(ctx, workspaceName, binding)
+   }
+   ```
+
+5. **Finalizer for Delete Handling:**
+   ```go
+   const StaffMemberFinalizer = "kdp-workspaces.cncf.io/staff-access"
+
+   func (r *StaffMemberReconciler) Reconcile(ctx context.Context,
+       req ctrl.Request) (ctrl.Result, error) {
+
+       staffMember := &maintainerv1alpha1.StaffMember{}
+       err := r.Get(ctx, req.NamespacedName, staffMember)
+
+       if err != nil {
+           if errors.IsNotFound(err) {
+               // Already deleted, nothing to do
+               return ctrl.Result{}, nil
+           }
+           return ctrl.Result{}, err
+       }
+
+       // Check if being deleted
+       if !staffMember.DeletionTimestamp.IsZero() {
+           // Handle deletion
+           if containsString(staffMember.Finalizers, StaffMemberFinalizer) {
+               // Remove from all workspaces
+               if err := r.removeStaffFromAllWorkspaces(ctx, staffMember); err != nil {
+                   return ctrl.Result{}, err
+               }
+
+               // Remove finalizer
+               staffMember.Finalizers = removeString(staffMember.Finalizers, StaffMemberFinalizer)
+               if err := r.Update(ctx, staffMember); err != nil {
+                   return ctrl.Result{}, err
+               }
+           }
+           return ctrl.Result{}, nil
+       }
+
+       // Add finalizer if not present
+       if !containsString(staffMember.Finalizers, StaffMemberFinalizer) {
+           staffMember.Finalizers = append(staffMember.Finalizers, StaffMemberFinalizer)
+           if err := r.Update(ctx, staffMember); err != nil {
+               return ctrl.Result{}, err
+           }
+       }
+
+       // Normal reconciliation
+       return r.handleStaffMemberUpsert(ctx, staffMember)
+   }
+   ```
+
+**Benefits:**
+- 500× efficiency improvement for large deployments
+- Faster response time to staff changes
+- Reduced API server load
+
+**Considerations:**
+- More complex code paths (create/update/delete)
+- Need to handle edge cases (binding doesn't exist yet)
+- Requires finalizer management for clean deletion
+
+---
+
+### Optimization B: Watch for New Workspaces
+
+**Current MVP Behavior:**
+- StaffMemberReconciler only triggers on StaffMember changes
+- New workspaces created by ProjectReconciler don't immediately get staff access
+- Gap exists until next StaffMember change triggers reconciliation
+
+**Optimization Goal:**
+- Immediately add staff access to new workspaces when they're created
+- Eliminate the gap between workspace creation and staff access
+
+**Implementation Details:**
+
+1. **Add Workspace Watch to StaffMemberReconciler:**
+   ```go
+   func (r *StaffMemberReconciler) SetupWithManager(mgr ctrl.Manager) error {
+       // Watch StaffMember resources on Service Cluster
+       staffMember := &maintainerv1alpha1.StaffMember{}
+
+       // Create mapper function to enqueue reconcile requests when workspaces change
+       workspaceToRequests := func(ctx context.Context, obj client.Object) []reconcile.Request {
+           // When a workspace is created/updated, trigger reconciliation
+           // We use a dummy request since we'll fetch all staff members anyway
+           return []reconcile.Request{{
+               NamespacedName: types.NamespacedName{
+                   Name:      "workspace-trigger",
+                   Namespace: r.StaffMemberNamespace,
+               },
+           }}
+       }
+
+       // Setup watches
+       return ctrl.NewControllerManagedBy(mgr).
+           For(staffMember).
+           // Watch workspaces in KCP cluster
+           Watches(
+               &tenancyv1alpha1.Workspace{},
+               handler.EnqueueRequestsFromMapFunc(workspaceToRequests),
+           ).
+           Complete(r)
+   }
+   ```
+
+2. **Configure Manager for Cross-Cluster Watching:**
+   ```go
+   // In cmd/main.go
+
+   // Create manager for Service Cluster (default)
+   mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+       Scheme: scheme,
+       // ... other options
+   })
+
+   // Load KCP config
+   kcpConfig, err := kcp.LoadConfigFromCluster(
+       context.Background(),
+       mgr.GetClient(),
+       kcpConfigMapName,
+       kcpSecretName,
+       kcpConfigMapNamespace,
+   )
+
+   // Create KCP client
+   kcpClient, err := kcp.NewClient(kcpConfig)
+
+   // Add KCP workspace type to scheme
+   tenancyv1alpha1.AddToScheme(mgr.GetScheme())
+
+   // Create cache for KCP cluster
+   kcpCache, err := cache.New(kcpClient.GetRESTConfig(), cache.Options{
+       Scheme: mgr.GetScheme(),
+       // Only watch Workspace resources
+       DefaultNamespaces: map[string]cache.Config{
+           kcpConfig.WorkspacePath: {},
+       },
+   })
+
+   // Add KCP cache to manager
+   if err := mgr.Add(kcpCache); err != nil {
+       setupLog.Error(err, "unable to add KCP cache to manager")
+       os.Exit(1)
+   }
+   ```
+
+3. **Enhanced Reconcile Logic for Workspace Events:**
+   ```go
+   func (r *StaffMemberReconciler) Reconcile(ctx context.Context,
+       req ctrl.Request) (ctrl.Result, error) {
+
+       logger := log.FromContext(ctx)
+
+       // Check if this is a workspace-triggered reconciliation
+       if req.Name == "workspace-trigger" {
+           logger.Info("Reconciling due to workspace change")
+           return r.reconcileAllWorkspaces(ctx)
+       }
+
+       // Otherwise, this is a StaffMember change
+       staffMember := &maintainerv1alpha1.StaffMember{}
+       err := r.Get(ctx, req.NamespacedName, staffMember)
+       // ... handle StaffMember reconciliation
+   }
+
+   func (r *StaffMemberReconciler) reconcileAllWorkspaces(ctx context.Context) (ctrl.Result, error) {
+       // Fetch ALL staff members
+       staffList := &maintainerv1alpha1.StaffMemberList{}
+       if err := r.List(ctx, staffList,
+           client.InNamespace(r.StaffMemberNamespace)); err != nil {
+           return ctrl.Result{}, err
+       }
+
+       // Build complete subjects list
+       subjects := []rbacv1.Subject{}
+       for _, staff := range staffList.Items {
+           if email := staff.Spec.PrimaryEmail; email != "" {
+               subjects = append(subjects, rbacv1.Subject{
+                   Kind: "User",
+                   Name: fmt.Sprintf("oidc:%s", email),
+               })
+           }
+       }
+
+       // List all managed workspaces
+       workspaces, err := r.kcpClient.ListManagedWorkspaces(ctx)
+       if err != nil {
+           return ctrl.Result{RequeueAfter: 30 * time.Second}, err
+       }
+
+       // Create/update bindings in all workspaces
+       var reconcileErrors []error
+       for _, ws := range workspaces {
+           if err := r.kcpClient.CreateOrUpdateStaffBinding(ctx, ws.Name, subjects); err != nil {
+               reconcileErrors = append(reconcileErrors, err)
+           }
+       }
+
+       if len(reconcileErrors) > 0 {
+           return ctrl.Result{RequeueAfter: 30 * time.Second},
+               errors.NewAggregate(reconcileErrors)
+       }
+
+       return ctrl.Result{}, nil
+   }
+   ```
+
+4. **Filter Workspaces by Annotation:**
+   ```go
+   // In workspace watch mapper function
+   workspaceToRequests := func(ctx context.Context, obj client.Object) []reconcile.Request {
+       workspace, ok := obj.(*tenancyv1alpha1.Workspace)
+       if !ok {
+           return nil
+       }
+
+       // Only trigger if workspace is managed by our operator
+       if workspace.Annotations["managed-by"] != "kdp-ws-operator" {
+           return nil
+       }
+
+       // Only trigger if workspace is Ready
+       if workspace.Status.Phase != corev1alpha1.LogicalClusterPhaseReady {
+           return nil
+       }
+
+       return []reconcile.Request{{
+           NamespacedName: types.NamespacedName{
+               Name:      "workspace-trigger",
+               Namespace: r.StaffMemberNamespace,
+           },
+       }}
+   }
+   ```
+
+**Benefits:**
+- ✅ Eliminates gap - new workspaces immediately get staff access
+- ✅ Proper event-driven architecture
+- ✅ No reliance on StaffMember changes to propagate access
+
+**Considerations:**
+- More complex setup (cross-cluster watches)
+- Need to configure manager with KCP cache
+- Potential for watch connection issues between clusters
+- Need proper RBAC for watching workspaces in KCP cluster
+
+**Alternative Simpler Approach:**
+Instead of cross-cluster watches, have `ProjectReconciler` explicitly notify or trigger the StaffMemberReconciler after creating a workspace:
+
+```go
+// In ProjectReconciler after workspace is ready
+if err := r.updateWorkspaceStatus(ctx, project, readyInfo); err != nil {
+    return ctrl.Result{}, err
+}
+
+// Trigger staff reconciliation by creating an event or annotation
+// Option 1: Add annotation to a dummy StaffMember
+// Option 2: Use a channel or in-memory queue
+// Option 3: Create a custom event resource
+```
+
+---
+
+### Migration Plan for Optimizations
+
+**Step 1: Deploy Optimization A (Incremental Updates)**
+1. Implement `AddSubjectToStaffBinding` and `RemoveSubjectFromStaffBinding`
+2. Add finalizer support to StaffMemberReconciler
+3. Update reconcile logic to handle create/update/delete differently
+4. Test with gradual rollout (shadow mode: log what would be done)
+5. Enable incrementalmode via feature flag
+
+**Step 2: Deploy Optimization B (Workspace Watch)**
+1. Implement cross-cluster watch configuration
+2. Add workspace event handler
+3. Test watch reliability and reconnection logic
+4. Deploy with monitoring for watch failures
+5. Keep fallback to periodic sync if watch fails
+
+**Step 3: Combined Optimizations**
+- Optimization A handles StaffMember changes incrementally
+- Optimization B ensures new workspaces get immediate full sync
+- Together they provide both efficiency and completeness
+
+**Estimated Impact:**
+- Current: O(staff × workspaces) per StaffMember change = ~120,000 ops
+- With A: O(workspaces) per StaffMember change = ~240 ops (500× improvement)
+- With B: O(staff) per new workspace = ~500 ops vs ~0 (eliminates gap)
+
+---
+
 ## Summary of Annotations
 
 This implementation uses a **dual-annotation strategy** for comprehensive observability:
@@ -959,6 +1490,10 @@ This provides observability from both **user perspective** (staff members) and *
 2. **Metrics**: Add Prometheus metrics for staff reconciliation success/failure?
 3. **~~Status~~**: ✅ IMPLEMENTED - Using annotations on both StaffMembers and ClusterRoleBindings
 4. **Periodic Sync**: Add periodic reconciliation to detect/fix drift?
-5. **Binding Name**: Is `cncf-staff-access` the best name or should it be configurable?
+5. **~~Binding Name~~**: ✅ TO BE IMPLEMENTED - Make configurable via `--staff-access-binding-name` flag
 6. **Annotation Cleanup**: Should we remove annotations from deleted ClusterRoleBindings?
 7. **Annotation Conflicts**: How to handle if maintainer-d also tries to set annotations on StaffMembers?
+8. **~~Incremental Updates~~**: ✅ PLANNED - See Phase 6: Optimization A for incremental subject updates
+9. **~~Workspace Watch~~**: ✅ PLANNED - See Phase 6: Optimization B for immediate workspace access
+10. **Typed Resources**: Should we use typed StaffMember structs instead of unstructured? (See feedback)
+11. **KCP Client Caching**: Cache KCP client in reconciler instead of creating on each reconcile (See feedback)
