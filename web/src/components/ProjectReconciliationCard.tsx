@@ -54,6 +54,9 @@ type ProjectReconciliationCardProps = {
   services: ServiceSummary[];
   createdAt?: string | null;
   updatedAt?: string | null;
+  updatedBy?: string | null;
+  updatedAuditId?: number | null;
+  onUpdateMaturity?: (next: string) => Promise<void>;
   onRefresh?: () => void;
   isRefreshing?: boolean;
   canEdit?: boolean;
@@ -127,6 +130,9 @@ export default function ProjectReconciliationCard({
   maintainers,
   createdAt,
   updatedAt,
+  updatedBy,
+  updatedAuditId,
+  onUpdateMaturity,
   onRefresh,
   isRefreshing,
   canEdit = false,
@@ -239,16 +245,13 @@ export default function ProjectReconciliationCard({
                     </Link>
                     {maintainer.github ? <span className={styles.secondary}>@{maintainer.github}</span> : null}
                     {maintainer.company ? <span className={styles.secondary}>{maintainer.company}</span> : null}
-                    <span className={`${styles.statusBadge} ${statusClass}`}>
-                      {maintainer.status ? maintainer.status : "Status Unknown"}
-                    </span>
                     {refStatus === "fetched" ? (
                       <span
                         className={`${styles.statusBadge} ${
                           maintainer.inMaintainerRef ? styles.statusOk : styles.statusWarn
                         }`}
                       >
-                        {maintainer.inMaintainerRef ? "In GitHub" : "Missing On GitHub"}
+                        {maintainer.inMaintainerRef ? "PRESENT" : "NOT PRESENT"}
                       </span>
                     ) : (
                       <span className={`${styles.statusBadge} ${styles.statusMuted}`}>Not checked</span>
@@ -319,11 +322,15 @@ export default function ProjectReconciliationCard({
   const [refSaving, setRefSaving] = useState(false);
   const [refError, setRefError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<string>("legacy");
+  const [refEditing, setRefEditing] = useState(false);
+  const [maturityModalOpen, setMaturityModalOpen] = useState(false);
+  const [maturitySaving, setMaturitySaving] = useState(false);
+  const [maturityError, setMaturityError] = useState<string | null>(null);
   useEffect(() => {
-    if (isRefBroken && refInput.trim() === "" && refUrl) {
+    if ((isRefBroken || refEditing) && refInput.trim() === "" && refUrl) {
       setRefInput(refUrl);
     }
-  }, [isRefBroken, refInput, refUrl]);
+  }, [isRefBroken, refEditing, refInput, refUrl]);
 
   const dotProjectSection = (
     <div className={styles.section}>
@@ -336,11 +343,20 @@ export default function ProjectReconciliationCard({
     </div>
   );
 
+  const maturityOptions = ["Sandbox", "Incubating", "Graduated", "Archived"];
+  const allowedTransitions = maturityOptions.filter((option) => option !== maturity);
+
   const legacyContent = (
-    <div className={styles.legacyGrid}>
+    <div className={styles.legacyStack}>
+      <div className={styles.legacyIntro}>
+        Use this roll call to reconcile CNCF data with the project's OWNERS/MAINTAINERS list. If a maintainer is present
+        in our CNCF database and also on the OWNERS/MAINTAINERS file, then they are marked as present. If they are on
+        OWNERS/MAINTAINERS but not in the CNCF DB you can add them using the "ADD TO CNCF DATABASE" button.
+      </div>
+      <div className={styles.legacyGrid}>
       <div className={styles.column}>
         <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}>CNCF INTERNAL</h2>
+          <h2 className={styles.sectionTitle}>CNCF DATABASE</h2>
         </div>
 
         <div className={styles.section}>
@@ -354,70 +370,39 @@ export default function ProjectReconciliationCard({
 
       <div className={styles.column}>
         <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}>
-            {refUrl ? (
-              <a className={styles.refTitleLink} href={refUrl} target="_blank" rel="noreferrer">
-                PROJECT ADMIN FILE
-                <span className={styles.refTitleUrl}>{refUrl}</span>
-              </a>
-            ) : (
-              "PROJECT ADMIN FILE"
-            )}
-          </h2>
+          <h2 className={styles.sectionTitle}>OWNERS/MAINTAINERS</h2>
+          {canEdit && onUpdateMaintainerRef ? (
+            <button
+              className={styles.refEditButton}
+              type="button"
+              onClick={() => {
+                setRefEditing((value) => !value);
+                setRefError(null);
+                if (refUrl) {
+                  setRefInput(refUrl);
+                }
+              }}
+            >
+              {refEditing ? "Cancel" : "Edit Link"}
+            </button>
+          ) : null}
+          {refUrl ? (
+            <a className={styles.refLink} href={refUrl} target="_blank" rel="noreferrer">
+              {refUrl}
+            </a>
+          ) : null}
         </div>
 
         <div className={styles.section}>
-          {!refUrl && canEdit && onUpdateMaintainerRef ? (
+          {canEdit && onUpdateMaintainerRef && (refEditing || !refUrl || isRefBroken) ? (
             <div className={styles.refMissing}>
-              <div className={styles.refMissingText}>No project admin file is registered for this project.</div>
-              <div className={styles.refInputRow}>
-                <input
-                  className={styles.refInput}
-                  type="url"
-                  placeholder="https://github.com/org/repo/blob/main/MAINTAINERS.md"
-                  value={refInput}
-                  onChange={(event) => {
-                    setRefInput(event.target.value);
-                    setRefError(null);
-                  }}
-                />
-                <button
-                  className={styles.refSaveButton}
-                  type="button"
-                  disabled={refSaving || refInput.trim() === ""}
-                  onClick={async () => {
-                    if (!onUpdateMaintainerRef) {
-                      return;
-                    }
-                    const next = refInput.trim();
-                    if (!next) {
-                      setRefError("Enter a URL for the project admin file.");
-                      return;
-                    }
-                    setRefSaving(true);
-                    setRefError(null);
-                    try {
-                      await onUpdateMaintainerRef(next);
-                      setRefInput("");
-                      if (onRefresh) {
-                        onRefresh();
-                      }
-                    } catch {
-                      setRefError("Unable to update project admin file.");
-                    } finally {
-                      setRefSaving(false);
-                    }
-                  }}
-                >
-                  {refSaving ? "Saving..." : "Save"}
-                </button>
+              <div className={styles.refMissingText}>
+                {!refUrl
+                  ? "No project admin file is registered for this project."
+                  : isRefBroken
+                  ? "The project admin file could not be loaded. Update the URL below."
+                  : "Update the project admin file URL."}
               </div>
-              {refError ? <div className={styles.refError}>{refError}</div> : null}
-            </div>
-          ) : null}
-          {isRefBroken && canEdit && onUpdateMaintainerRef ? (
-            <div className={styles.refMissing}>
-              <div className={styles.refMissingText}>The project admin file could not be loaded. Update the URL below.</div>
               <div className={styles.refInputRow}>
                 <input
                   className={styles.refInput}
@@ -446,6 +431,8 @@ export default function ProjectReconciliationCard({
                     setRefError(null);
                     try {
                       await onUpdateMaintainerRef(next);
+                      setRefEditing(false);
+                      setRefInput("");
                       if (onRefresh) {
                         onRefresh();
                       }
@@ -506,7 +493,7 @@ export default function ProjectReconciliationCard({
                           setModalOpen(true);
                         }}
                       >
-                        Add to maintainer-d
+                        ADD TO CNCF DATABASE
                       </button>
                     ) : null}
                   </div>
@@ -516,11 +503,12 @@ export default function ProjectReconciliationCard({
           )}
         </div>
       </div>
+      </div>
     </div>
   );
 
   const menuItems = [
-    { id: "legacy", label: "PROJECT RECORDS / LEGACY DATA" },
+    { id: "legacy", label: "MAINTAINER ROLL CALL" },
     { id: "dot-project", label: "PROJECT RECORDS / DOT PROJECT YAML" },
     { id: "license-checker", label: "SERVICES / LICENSE CHECKER" },
     { id: "mailing-maintainers", label: "SERVICES / MAILING LISTS / MAINTAINERS" },
@@ -608,7 +596,31 @@ export default function ProjectReconciliationCard({
             <div className={styles.meta}>
               <span className={styles.metaItem}>Imported from google worksheet on {formatDate(createdAt)}</span>
               <span className={styles.metaItem}>Last edited {formatDate(updatedAt)}</span>
+              {updatedBy ? (
+                <span className={styles.metaItem}>
+                  Updated by{" "}
+                  {updatedAuditId ? (
+                    <Link className={styles.metaLink} href={`/audit?entry=${updatedAuditId}`}>
+                      {updatedBy}
+                    </Link>
+                  ) : (
+                    updatedBy
+                  )}
+                </span>
+              ) : null}
             </div>
+            {canEdit && onUpdateMaturity && allowedTransitions.length > 0 ? (
+              <button
+                className={styles.transitionButton}
+                type="button"
+                onClick={() => {
+                  setMaturityModalOpen(true);
+                  setMaturityError(null);
+                }}
+              >
+                Transition
+              </button>
+            ) : null}
           </div>
 
         </div>
@@ -652,6 +664,59 @@ export default function ProjectReconciliationCard({
               setModalOpen(false);
             }}
           />
+        ) : null}
+        {maturityModalOpen ? (
+          <div className={styles.modalOverlay} role="dialog" aria-modal="true">
+            <div className={styles.modal}>
+              <div className={styles.modalHeader}>
+                <h2 className={styles.modalTitle}>Transition Project Status</h2>
+                <button
+                  className={styles.modalClose}
+                  type="button"
+                  onClick={() => setMaturityModalOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+              <div className={styles.modalBody}>
+                <div className={styles.modalRow}>
+                  <span className={styles.modalLabel}>Current</span>
+                  <span className={styles.modalValue}>{maturity || "—"}</span>
+                </div>
+                <div className={styles.modalRow}>
+                  <span className={styles.modalLabel}>Next state</span>
+                  <div className={styles.transitionOptions}>
+                    {allowedTransitions.map((next) => (
+                      <button
+                        key={next}
+                        className={styles.transitionOption}
+                        type="button"
+                        disabled={maturitySaving}
+                        onClick={async () => {
+                          if (!onUpdateMaturity) {
+                            return;
+                          }
+                          setMaturitySaving(true);
+                          setMaturityError(null);
+                          try {
+                            await onUpdateMaturity(next);
+                            setMaturityModalOpen(false);
+                          } catch {
+                            setMaturityError("Unable to update project status.");
+                          } finally {
+                            setMaturitySaving(false);
+                          }
+                        }}
+                      >
+                        {next}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {maturityError ? <div className={styles.modalError}>{maturityError}</div> : null}
+              </div>
+            </div>
+          </div>
         ) : null}
       </div>
     </Card>

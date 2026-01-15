@@ -44,6 +44,8 @@ type ProjectDetail = {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
+  updatedBy?: string | null;
+  updatedAuditId?: number | null;
 };
 
 const projectDataHasChanged = (
@@ -68,7 +70,9 @@ const projectDataHasChanged = (
     current.mailingList !== next.mailingList ||
     current.createdAt !== next.createdAt ||
     current.updatedAt !== next.updatedAt ||
-    current.deletedAt !== next.deletedAt
+    current.deletedAt !== next.deletedAt ||
+    current.updatedBy !== next.updatedBy ||
+    current.updatedAuditId !== next.updatedAuditId
   ) {
     return true;
   }
@@ -300,10 +304,28 @@ export default function ProjectPage() {
               services={project.services}
               createdAt={project.createdAt}
               updatedAt={project.updatedAt}
+              updatedBy={project.updatedBy}
+              updatedAuditId={project.updatedAuditId}
               onRefresh={handleRefresh}
               isRefreshing={status === "loading"}
               canEdit={role === "staff"}
               companyOptions={companies}
+              onUpdateMaturity={async (next) => {
+                if (!projectId) {
+                  return;
+                }
+                const response = await fetch(`${apiBaseUrl}/projects/${projectId}/maturity`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "include",
+                  body: JSON.stringify({ maturity: next }),
+                });
+                if (!response.ok) {
+                  setError("Unable to update project status");
+                  throw new Error("update failed");
+                }
+                await handleRefresh();
+              }}
               onUpdateMaintainerRef={async (nextRef) => {
                 if (!projectId) {
                   return;

@@ -509,6 +509,8 @@ type projectDetailResponse struct {
 	CreatedAt         time.Time                 `json:"createdAt"`
 	UpdatedAt         time.Time                 `json:"updatedAt"`
 	DeletedAt         *time.Time                `json:"deletedAt,omitempty"`
+	UpdatedBy         string                    `json:"updatedBy,omitempty"`
+	UpdatedAuditID    *uint                     `json:"updatedAuditId,omitempty"`
 }
 
 func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
@@ -612,6 +614,10 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPatch {
+		if strings.HasSuffix(r.URL.Path, "/maturity") {
+			s.handleProjectMaturityUpdate(w, r)
+			return
+		}
 		s.handleProjectMaintainerRefUpdate(w, r)
 		return
 	}
@@ -685,6 +691,24 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 		ts := project.DeletedAt.Time
 		deletedAt = &ts
 	}
+	var updatedBy string
+	var updatedAuditID *uint
+	var audit model.AuditLog
+	if err := s.store.DB().
+		Where("project_id = ? AND action IN ?", id, []string{"PROJECT_MAINTAINER_REF_UPDATE", "PROJECT_MATURITY_UPDATE"}).
+		Order("created_at desc").
+		First(&audit).Error; err == nil {
+		if audit.StaffID != nil {
+			var staff model.StaffMember
+			if err := s.store.DB().First(&staff, *audit.StaffID).Error; err == nil {
+				updatedBy = staff.Name
+			}
+		}
+		if updatedBy == "" {
+			updatedBy = "Staff"
+		}
+		updatedAuditID = &audit.ID
+	}
 
 	response := projectDetailResponse{
 		ID:                project.ID,
@@ -700,6 +724,8 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:         project.CreatedAt,
 		UpdatedAt:         project.UpdatedAt,
 		DeletedAt:         deletedAt,
+		UpdatedBy:         updatedBy,
+		UpdatedAuditID:    updatedAuditID,
 	}
 
 	maintainerRef := strings.TrimSpace(project.MaintainerRef)
@@ -729,6 +755,10 @@ type projectMaintainerRefUpdateRequest struct {
 	MaintainerRef string `json:"maintainerRef"`
 }
 
+type projectMaturityUpdateRequest struct {
+	Maturity string `json:"maturity"`
+}
+
 func (s *server) handleProjectMaintainerRefUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
@@ -754,6 +784,16 @@ func (s *server) handleProjectMaintainerRefUpdate(w http.ResponseWriter, r *http
 		http.Error(w, "maintainerRef must be a URL", http.StatusBadRequest)
 		return
 	}
+	beforeProject, beforeErr := s.store.GetProjectByID(id)
+	if beforeErr != nil {
+		if errors.Is(beforeErr, db.ErrProjectNotFound) {
+			http.Error(w, "project not found", http.StatusNotFound)
+			return
+		}
+		s.logger.Printf("web-bff: load project before maintainerRef update failed id=%d err=%v", id, beforeErr)
+		http.Error(w, "failed to update project", http.StatusInternalServerError)
+		return
+	}
 	if err := s.store.UpdateProjectMaintainerRef(id, ref); err != nil {
 		if errors.Is(err, db.ErrProjectNotFound) {
 			http.Error(w, "project not found", http.StatusNotFound)
@@ -763,6 +803,140 @@ func (s *server) handleProjectMaintainerRefUpdate(w http.ResponseWriter, r *http
 		http.Error(w, "failed to update project", http.StatusInternalServerError)
 		return
 	}
+	var staffID *uint
+	staffName := ""
+	if session.Login != "" {
+		var staff model.StaffMember
+		if err := s.store.DB().
+			Where("LOWER(git_hub_account) = ?", strings.ToLower(session.Login)).
+			First(&staff).Error; err == nil {
+			staffID = &staff.ID
+			staffName = staff.Name
+		}
+	}
+	if staffName == "" {
+		staffName = session.Login
+	}
+	changes := map[string]map[string]string{
+		"maintainerRef": {
+			"from": strings.TrimSpace(beforeProject.MaintainerRef),
+			"to":   ref,
+		},
+	}
+	metadata := map[string]any{
+		"actor": map[string]string{
+			"login": session.Login,
+			"role":  session.Role,
+		},
+		"changes": changes,
+	}
+	if metadataJSON, err := json.Marshal(metadata); err != nil {
+		s.logger.Printf("web-bff: update maintainerRef audit metadata encode error: %v", err)
+	} else {
+		event := model.AuditLog{
+			ProjectID: &id,
+			StaffID:   staffID,
+			Action:    "PROJECT_MAINTAINER_REF_UPDATE",
+			Message:   fmt.Sprintf("Project maintainer ref updated by %s", staffName),
+			Metadata:  string(metadataJSON),
+		}
+		if err := s.store.DB().Create(&event).Error; err != nil {
+			s.logger.Printf("web-bff: update maintainerRef audit log failed: %v", err)
+		}
+	}
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		s.logger.Printf("web-bff: handleProject update encode error: %v", err)
+	}
+}
+
+func (s *server) handleProjectMaturityUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	trimmed := strings.TrimSuffix(r.URL.Path, "/maturity")
+	id, err := parseIDParam(trimmed, "/api/projects/")
+	if err != nil {
+		http.Error(w, "invalid project id", http.StatusBadRequest)
+		return
+	}
+	session := sessionFromContext(r.Context())
+	if session == nil || session.Role != roleStaff {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var req projectMaturityUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	next, ok := parseMaturity(req.Maturity)
+	if !ok {
+		http.Error(w, "invalid maturity", http.StatusBadRequest)
+		return
+	}
+	project, err := s.store.GetProjectByID(id)
+	if err != nil {
+		if errors.Is(err, db.ErrProjectNotFound) {
+			http.Error(w, "project not found", http.StatusNotFound)
+			return
+		}
+		s.logger.Printf("web-bff: load project before maturity update failed id=%d err=%v", id, err)
+		http.Error(w, "failed to update project", http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.UpdateProjectMaturity(id, next); err != nil {
+		if errors.Is(err, db.ErrProjectNotFound) {
+			http.Error(w, "project not found", http.StatusNotFound)
+			return
+		}
+		s.logger.Printf("web-bff: update maturity failed id=%d err=%v", id, err)
+		http.Error(w, "failed to update project", http.StatusInternalServerError)
+		return
+	}
+
+	var staffID *uint
+	staffName := ""
+	if session.Login != "" {
+		var staff model.StaffMember
+		if err := s.store.DB().
+			Where("LOWER(git_hub_account) = ?", strings.ToLower(session.Login)).
+			First(&staff).Error; err == nil {
+			staffID = &staff.ID
+			staffName = staff.Name
+		}
+	}
+	if staffName == "" {
+		staffName = session.Login
+	}
+	metadata := map[string]any{
+		"actor": map[string]string{
+			"login": session.Login,
+			"role":  session.Role,
+		},
+		"changes": map[string]map[string]string{
+			"maturity": {
+				"from": string(project.Maturity),
+				"to":   string(next),
+			},
+		},
+	}
+	if metadataJSON, err := json.Marshal(metadata); err != nil {
+		s.logger.Printf("web-bff: update maturity audit metadata encode error: %v", err)
+	} else {
+		event := model.AuditLog{
+			ProjectID: &id,
+			StaffID:   staffID,
+			Action:    "PROJECT_MATURITY_UPDATE",
+			Message:   fmt.Sprintf("Project maturity updated by %s", staffName),
+			Metadata:  string(metadataJSON),
+		}
+		if err := s.store.DB().Create(&event).Error; err != nil {
+			s.logger.Printf("web-bff: update maturity audit log failed: %v", err)
+		}
+	}
+
 	w.Header().Set(headerContentType, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
 		s.logger.Printf("web-bff: handleProject update encode error: %v", err)
@@ -1644,6 +1818,21 @@ func parseIDParam(path, prefix string) (uint, error) {
 		return 0, fmt.Errorf("invalid id")
 	}
 	return uint(value), nil
+}
+
+func parseMaturity(value string) (model.Maturity, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "sandbox":
+		return model.Sandbox, true
+	case "incubating":
+		return model.Incubating, true
+	case "graduated":
+		return model.Graduated, true
+	case "archived":
+		return model.Archived, true
+	default:
+		return "", false
+	}
 }
 
 func normalizeValue(value, sentinel string) string {

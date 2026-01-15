@@ -185,7 +185,7 @@ export default function ProjectReconciliationCard({
         <div className={styles.columns}>
           <div className={styles.column}>
             <div className={styles.sectionHeader}>
-              <h2 className={styles.sectionTitle}>CNCF INTERNAL</h2>
+              <h2 className={styles.sectionTitle}>CNCF DATABASE</h2>
             </div>
 
             <div className={styles.section}>
@@ -429,7 +429,7 @@ export default function ProjectReconciliationCard({
                               setModalOpen(true);
                             }}
                           >
-                            Add to maintainer-d
+                              ADD TO CNCF DATABASE
                           </button>
                         ) : null}
                       </div>
