@@ -155,7 +155,7 @@ func (r *StaffMemberReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	for _, ws := range workspaces {
 		logger.Info("Updating staff binding in workspace", "workspace", ws.Name)
-		if err := kcpClient.CreateOrUpdateStaffBinding(ctx, ws.Name, subjects); err != nil {
+		if err := kcpClient.CreateOrUpdateStaffBinding(ctx, ws.Name, subjects, r.StaffMemberNamespace); err != nil {
 			logger.Error(err, "Failed to update staff binding", "workspace", ws.Name)
 			workspaceErrors = append(workspaceErrors, fmt.Errorf("workspace %s: %w", ws.Name, err))
 			failedWorkspaces = append(failedWorkspaces, ws.Name)

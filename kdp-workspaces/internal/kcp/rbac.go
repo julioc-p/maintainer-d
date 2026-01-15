@@ -57,8 +57,9 @@ const (
 
 // CreateOrUpdateStaffBinding creates or updates a ClusterRoleBinding in the specified workspace
 // with the given subjects. The binding grants the kdp:owner role to all subjects.
+// sourceNamespace identifies where the StaffMember resources originate from.
 func (c *Client) CreateOrUpdateStaffBinding(ctx context.Context,
-	workspaceName string, subjects []rbacv1.Subject) error {
+	workspaceName string, subjects []rbacv1.Subject, sourceNamespace string) error {
 
 	if workspaceName == "" {
 		return fmt.Errorf("workspace name cannot be empty")
@@ -94,7 +95,7 @@ func (c *Client) CreateOrUpdateStaffBinding(ctx context.Context,
 				AnnotationBindingLastSynced:      time.Now().Format(time.RFC3339),
 				AnnotationBindingStaffCount:      fmt.Sprintf("%d", len(subjects)),
 				AnnotationBindingManagedBy:       OperatorName,
-				AnnotationBindingSourceNamespace: "maintainerd",
+				AnnotationBindingSourceNamespace: sourceNamespace,
 			},
 			Labels: map[string]string{
 				LabelManagedBy: OperatorName,
