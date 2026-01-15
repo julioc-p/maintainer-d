@@ -89,21 +89,21 @@ func (r *StaffMemberReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	)
 	if err != nil {
 		logger.Error(err, "Failed to load kcp configuration")
-		return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
+		return ctrl.Result{}, fmt.Errorf("failed to load kcp configuration: %w", err)
 	}
 
 	// Create kcp client
 	kcpClient, err := kcp.NewClient(kcpConfig)
 	if err != nil {
 		logger.Error(err, "Failed to create kcp client")
-		return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
+		return ctrl.Result{}, fmt.Errorf("failed to create kcp client: %w", err)
 	}
 
 	// List all managed workspaces
 	workspaces, err := kcpClient.ListManagedWorkspaces(ctx)
 	if err != nil {
 		logger.Error(err, "Failed to list managed workspaces")
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, err
+		return ctrl.Result{}, fmt.Errorf("failed to list managed workspaces: %w", err)
 	}
 
 	logger.Info("Found managed workspaces", "count", len(workspaces))
