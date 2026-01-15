@@ -246,13 +246,9 @@ export default function ProjectReconciliationCard({
                     {maintainer.github ? <span className={styles.secondary}>@{maintainer.github}</span> : null}
                     {maintainer.company ? <span className={styles.secondary}>{maintainer.company}</span> : null}
                     {refStatus === "fetched" ? (
-                      <span
-                        className={`${styles.statusBadge} ${
-                          maintainer.inMaintainerRef ? styles.statusOk : styles.statusWarn
-                        }`}
-                      >
-                        {maintainer.inMaintainerRef ? "PRESENT" : "NOT PRESENT"}
-                      </span>
+                      maintainer.inMaintainerRef ? null : (
+                        <span className={`${styles.statusBadge} ${styles.statusWarn}`}>NOT PRESENT</span>
+                      )
                     ) : (
                       <span className={`${styles.statusBadge} ${styles.statusMuted}`}>Not checked</span>
                     )}
@@ -349,160 +345,163 @@ export default function ProjectReconciliationCard({
   const legacyContent = (
     <div className={styles.legacyStack}>
       <div className={styles.legacyIntro}>
-        Use this roll call to reconcile CNCF data with the project's OWNERS/MAINTAINERS list. If a maintainer is present
-        in our CNCF database and also on the OWNERS/MAINTAINERS file, then they are marked as present. If they are on
-        OWNERS/MAINTAINERS but not in the CNCF DB you can add them using the "ADD TO CNCF DATABASE" button.
+        Use this roll call to reconcile CNCF records with OWNERS/MAINTAINERS. Add missing people with the ADD MAINTAINER
+        buttons.
       </div>
       <div className={styles.legacyGrid}>
-      <div className={styles.column}>
-        <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}>CNCF DATABASE</h2>
+        <div className={styles.column}>
+          <div className={styles.sectionHeader}>
+            <h2 className={styles.sectionTitle}>PRESENT IN CNCF DATABASE</h2>
+          </div>
+
+          <div className={styles.section}>
+            {maintainers.length === 0 ? (
+              <div className={styles.empty}>No maintainers found.</div>
+            ) : (
+              renderMaintainerGroups()
+            )}
+          </div>
         </div>
 
-        <div className={styles.section}>
-          {maintainers.length === 0 ? (
-            <div className={styles.empty}>No maintainers found.</div>
-          ) : (
-            renderMaintainerGroups()
-          )}
-        </div>
-      </div>
-
-      <div className={styles.column}>
-        <div className={styles.sectionHeader}>
-          <h2 className={styles.sectionTitle}>OWNERS/MAINTAINERS</h2>
-          {canEdit && onUpdateMaintainerRef ? (
-            <button
-              className={styles.refEditButton}
-              type="button"
-              onClick={() => {
-                setRefEditing((value) => !value);
-                setRefError(null);
-                if (refUrl) {
-                  setRefInput(refUrl);
-                }
-              }}
-            >
-              {refEditing ? "Cancel" : "Edit Link"}
-            </button>
-          ) : null}
-          {refUrl ? (
-            <a className={styles.refLink} href={refUrl} target="_blank" rel="noreferrer">
-              {refUrl}
-            </a>
-          ) : null}
-        </div>
-
-        <div className={styles.section}>
-          {canEdit && onUpdateMaintainerRef && (refEditing || !refUrl || isRefBroken) ? (
-            <div className={styles.refMissing}>
-              <div className={styles.refMissingText}>
-                {!refUrl
-                  ? "No project admin file is registered for this project."
-                  : isRefBroken
-                  ? "The project admin file could not be loaded. Update the URL below."
-                  : "Update the project admin file URL."}
-              </div>
-              <div className={styles.refInputRow}>
-                <input
-                  className={styles.refInput}
-                  type="url"
-                  placeholder="https://github.com/org/repo/blob/main/MAINTAINERS.md"
-                  value={refInput}
-                  onChange={(event) => {
-                    setRefInput(event.target.value);
-                    setRefError(null);
-                  }}
-                />
-                <button
-                  className={styles.refSaveButton}
-                  type="button"
-                  disabled={refSaving || refInput.trim() === ""}
-                  onClick={async () => {
-                    if (!onUpdateMaintainerRef) {
-                      return;
-                    }
-                    const next = refInput.trim();
-                    if (!next) {
-                      setRefError("Enter a URL for the project admin file.");
-                      return;
-                    }
-                    setRefSaving(true);
-                    setRefError(null);
-                    try {
-                      await onUpdateMaintainerRef(next);
-                      setRefEditing(false);
-                      setRefInput("");
-                      if (onRefresh) {
-                        onRefresh();
-                      }
-                    } catch {
-                      setRefError("Unable to update project admin file.");
-                    } finally {
-                      setRefSaving(false);
-                    }
-                  }}
-                >
-                  {refSaving ? "Saving..." : "Save"}
-                </button>
-              </div>
-              {refError ? <div className={styles.refError}>{refError}</div> : null}
-            </div>
-          ) : null}
-          {refBody ? (
-            <div className={styles.refMarkdown}>
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeRaw, [rehypeSanitize, maintainerRefSchema]]}
+        <div className={styles.column}>
+          <div className={styles.sectionHeader}>
+            <h2 className={styles.sectionTitle}>OWNERS/MAINTAINERS</h2>
+            {canEdit && onUpdateMaintainerRef ? (
+              <button
+                className={styles.refEditButton}
+                type="button"
+                onClick={() => {
+                  setRefEditing((value) => !value);
+                  setRefError(null);
+                  if (refUrl) {
+                    setRefInput(refUrl);
+                  }
+                }}
               >
-                {refBody}
-              </ReactMarkdown>
-            </div>
-          ) : (
-            <div className={styles.empty}>
-              {refStatus === "fetched" ? "No maintainer ref contents available." : "Maintainer ref not available."}
-            </div>
-          )}
+                {refEditing ? "Cancel" : "Edit Link"}
+              </button>
+            ) : null}
+            {refUrl ? (
+              <a className={styles.refLink} href={refUrl} target="_blank" rel="noreferrer">
+                {refUrl}
+              </a>
+            ) : null}
+          </div>
+
+          <div className={`${styles.section} ${styles.ownersSection}`}>
+            {canEdit && onUpdateMaintainerRef && (refEditing || !refUrl || isRefBroken) ? (
+              <div className={styles.refMissing}>
+                <div className={styles.refMissingText}>
+                  {!refUrl
+                    ? "No project admin file is registered for this project."
+                    : isRefBroken
+                    ? "The project admin file could not be loaded. Update the URL below."
+                    : "Update the project admin file URL."}
+                </div>
+                <div className={styles.refInputRow}>
+                  <input
+                    className={styles.refInput}
+                    type="url"
+                    placeholder="https://github.com/org/repo/blob/main/MAINTAINERS.md"
+                    value={refInput}
+                    onChange={(event) => {
+                      setRefInput(event.target.value);
+                      setRefError(null);
+                    }}
+                  />
+                  <button
+                    className={styles.refSaveButton}
+                    type="button"
+                    disabled={refSaving || refInput.trim() === ""}
+                    onClick={async () => {
+                      if (!onUpdateMaintainerRef) {
+                        return;
+                      }
+                      const next = refInput.trim();
+                      if (!next) {
+                        setRefError("Enter a URL for the project admin file.");
+                        return;
+                      }
+                      setRefSaving(true);
+                      setRefError(null);
+                      try {
+                        await onUpdateMaintainerRef(next);
+                        setRefEditing(false);
+                        setRefInput("");
+                        if (onRefresh) {
+                          onRefresh();
+                        }
+                      } catch {
+                        setRefError("Unable to update project admin file.");
+                      } finally {
+                        setRefSaving(false);
+                      }
+                    }}
+                  >
+                    {refSaving ? "Saving..." : "Save"}
+                  </button>
+                </div>
+                {refError ? <div className={styles.refError}>{refError}</div> : null}
+              </div>
+            ) : null}
+            {refBody ? (
+              <div className={styles.refMarkdown}>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeRaw, [rehypeSanitize, maintainerRefSchema]]}
+                >
+                  {refBody}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              <div className={styles.empty}>
+                {refStatus === "fetched" ? "No maintainer ref contents available." : "Maintainer ref not available."}
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className={styles.section}>
-          <h3 className={styles.subSectionTitle}>Maintainers on GitHub, not in maintainer-d</h3>
-          {refOnlyGitHub.length === 0 ? (
-            <div className={styles.empty}>None detected.</div>
-          ) : (
-            <ul className={styles.list}>
-              {refOnlyGitHub.map((handle) => (
-                <li key={handle} className={styles.listItem}>
-                  <div className={styles.listRow}>
-                    <a className={styles.link} href={`https://github.com/${handle}`} target="_blank" rel="noreferrer">
-                      @{handle}
-                    </a>
+        <div className={styles.column}>
+          <div className={styles.sectionHeader}>
+            <h2 className={styles.sectionTitle}>NOT PRESENT ON CNCF DATABASE</h2>
+          </div>
+          <div className={styles.section}>
+            {refOnlyGitHub.length === 0 ? (
+              <div className={styles.empty}>None detected.</div>
+            ) : (
+              <ul className={styles.list}>
+                {refOnlyGitHub.map((handle) => (
+                  <li key={handle} className={styles.listItem}>
+                    <div className={styles.listRow}>
                     {canEdit ? (
                       <button
                         className={styles.addButton}
                         type="button"
-                        onClick={() => {
-                          setDraft({
-                            githubHandle: handle,
-                            name: handle,
-                            email: "",
-                            company: "",
-                            companyMode: "select",
-                            refLine: normalizedRefLines[handle.toLowerCase()] || "",
-                          });
-                          setModalOpen(true);
+                          onClick={() => {
+                            setDraft({
+                              githubHandle: handle,
+                              name: handle,
+                              email: "",
+                              company: "",
+                              companyMode: "select",
+                              refLine: normalizedRefLines[handle.toLowerCase()] || "",
+                            });
+                            setModalOpen(true);
                         }}
                       >
-                        ADD TO CNCF DATABASE
+                        ADD MAINTAINER
                       </button>
                     ) : null}
+                    <a className={styles.link} href={`https://github.com/${handle}`} target="_blank" rel="noreferrer">
+                      @{handle}
+                    </a>
                   </div>
                 </li>
               ))}
-            </ul>
-          )}
+              </ul>
+            )}
+          </div>
         </div>
-      </div>
       </div>
     </div>
   );

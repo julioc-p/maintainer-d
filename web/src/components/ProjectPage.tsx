@@ -397,7 +397,7 @@ export default function ProjectReconciliationCard({
             </div>
 
             <div className={styles.section}>
-              <h3 className={styles.subSectionTitle}>Maintainers on GitHub, not in maintainer-d</h3>
+            <h3 className={styles.subSectionTitle}>NOT PRESENT ON CNCF DATABASE</h3>
               {refOnlyGitHub.length === 0 ? (
                 <div className={styles.empty}>None detected.</div>
               ) : (
@@ -405,14 +405,6 @@ export default function ProjectReconciliationCard({
                   {refOnlyGitHub.map((handle) => (
                     <li key={handle} className={styles.listItem}>
                       <div className={styles.listRow}>
-                        <a
-                          className={styles.link}
-                          href={`https://github.com/${handle}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          @{handle}
-                        </a>
                         {canEdit ? (
                           <button
                             className={styles.addButton}
@@ -429,9 +421,17 @@ export default function ProjectReconciliationCard({
                               setModalOpen(true);
                             }}
                           >
-                              ADD TO CNCF DATABASE
+                            ADD MAINTAINER
                           </button>
                         ) : null}
+                        <a
+                          className={styles.link}
+                          href={`https://github.com/${handle}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          @{handle}
+                        </a>
                       </div>
                     </li>
                   ))}

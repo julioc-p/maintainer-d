@@ -493,9 +493,10 @@
   padding: 12px;
   background: var(--md-surface, rgba(15, 23, 42, 0.04));
   border-radius: 10px;
+  width: 100%;
   font-size: 12px;
   line-height: 1.6;
-  max-height: 420px;
+  flex: 1;
   overflow: auto;
 }
 
@@ -626,8 +627,21 @@
 
 .legacyGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr);
   gap: 16px;
+  align-items: stretch;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+}
+
+.ownersSection {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .groupStack {
