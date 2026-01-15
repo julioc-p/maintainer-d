@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Card } from "clo-ui/components/Card";
 import styles from "./ProjectCard.module.css";
 
@@ -27,9 +28,9 @@ export default function ProjectCard({
       <div className={styles.content}>
         <div className={styles.cardHeader}>
           <h2 className={styles.cardTitle}>
-            <a className={styles.cardTitleLink} href={`/projects/${id}`}>
+            <Link className={styles.cardTitleLink} href={`/projects/${id}`}>
               {name}
-            </a>
+            </Link>
           </h2>
           <span className={styles.maturityChip}>{maturity}</span>
         </div>
@@ -44,9 +45,12 @@ export default function ProjectCard({
             {maintainers.map((maintainer, index) => (
               <tr key={`${name}-${index}`}>
                 <td>
-                  <a className={styles.maintainerLink} href={`/maintainers/${maintainer.id}`}>
+                  <Link
+                    className={styles.maintainerLink}
+                    href={`/maintainers/${maintainer.id}`}
+                  >
                     {maintainer.name || "Unknown"}
-                  </a>
+                  </Link>
                 </td>
                 <td>{maintainer.github}</td>
               </tr>

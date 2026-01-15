@@ -247,6 +247,39 @@ func (s *SQLStore) UpdateMaintainersStatus(ids []uint, status model.MaintainerSt
 		Update("maintainer_status", status).Error
 }
 
+// UpdateMaintainerDetails updates a maintainer's editable fields and returns the updated record.
+func (s *SQLStore) UpdateMaintainerDetails(maintainerID uint, email, github string, status model.MaintainerStatus, companyID *uint) (*model.Maintainer, error) {
+	if !status.IsValid() {
+		return nil, fmt.Errorf("invalid maintainer status %q", status)
+	}
+
+	if companyID != nil {
+		var company model.Company
+		if err := s.db.First(&company, *companyID).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	updates := map[string]interface{}{
+		"email":             normalizeOrSentinel(email, "EMAIL_MISSING"),
+		"git_hub_account":   normalizeOrSentinel(github, "GITHUB_MISSING"),
+		"maintainer_status": status,
+		"company_id":        companyID,
+	}
+
+	if err := s.db.Model(&model.Maintainer{}).
+		Where("id = ?", maintainerID).
+		Updates(updates).Error; err != nil {
+		return nil, err
+	}
+
+	var maintainer model.Maintainer
+	if err := s.db.Preload("Company").Preload("Projects").First(&maintainer, maintainerID).Error; err != nil {
+		return nil, err
+	}
+	return &maintainer, nil
+}
+
 func (s *SQLStore) GetServiceTeamByProject(projectID, serviceID uint) (*model.ServiceTeam, error) {
 	var st model.ServiceTeam
 	err := s.db.
@@ -382,7 +415,7 @@ func (s *SQLStore) GetProjectMapByName() (map[string]model.Project, error) {
 	return projectsByName, nil
 }
 
-func (s *SQLStore) LogAuditEvent(logger *zap.SugaredLogger, event model.AuditLog) {
+func (s *SQLStore) LogAuditEvent(logger *zap.SugaredLogger, event model.AuditLog) error {
 	if event.Message == "" {
 		event.Message = event.Action
 	}
@@ -391,6 +424,7 @@ func (s *SQLStore) LogAuditEvent(logger *zap.SugaredLogger, event model.AuditLog
 	if err != nil {
 		logger.Errorf("failed to write %v audit log: %v", event, err)
 	}
+	return err
 }
 
 // CreateServiceTeam creates or retrieves a service team entry in the database based on the provided project and service details.

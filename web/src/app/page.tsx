@@ -91,7 +91,7 @@ export default function Home() {
           setProjects(data.projects);
           setTotalProjects(data.total);
         }
-      } catch (error) {
+      } catch {
         if (alive) {
           setProjectsError("Unable to load projects");
         }
@@ -107,7 +107,7 @@ export default function Home() {
     };
   }, [
     activeMaturity,
-    bffBaseUrl,
+    apiBaseUrl,
     limit,
     page,
     query,

@@ -41,6 +41,23 @@
   color: var(--md-chip-text, #0b1220);
 }
 
+.statusStack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.updatedNotice {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.18);
+  color: #0f5132;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
 .section {
   border-top: 1px solid var(--md-border, rgba(15, 23, 42, 0.08));
   padding-top: 16px;
@@ -65,6 +82,61 @@
 .detailLabel {
   font-weight: 600;
   color: var(--md-card-text-strong, #0b1220);
+}
+
+.detailValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.updatedBy {
+  color: var(--md-card-muted, rgba(15, 23, 42, 0.6));
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.link {
+  color: #d62293;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.copyButton {
+  border: 0;
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+  padding: 4px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.copyButton:hover {
+  background: rgba(37, 99, 235, 0.2);
+}
+
+.copyIcon {
+  width: 14px;
+  height: 14px;
+}
+
+.dateLine {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.ordinal {
+  font-size: 0.7em;
+  line-height: 1;
+  margin-left: -1px;
 }
 
 .projectList {

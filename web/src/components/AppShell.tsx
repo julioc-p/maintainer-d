@@ -5,6 +5,7 @@ import { Dropdown } from "clo-ui/components/Dropdown";
 import { Footer } from "clo-ui/components/Footer";
 import { Navbar } from "clo-ui/components/Navbar";
 import Link from "next/link";
+import { useTheme } from "./ThemeProvider";
 import styles from "./AppShell.module.css";
 
 type AppShellProps = {
@@ -24,10 +25,7 @@ export default function AppShell({
   navCenterClassName,
 }: AppShellProps) {
   const [me, setMe] = useState<MeResponse | null>(null);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [meStatus, setMeStatus] = useState<"idle" | "loading" | "ready">(
-    "idle"
-  );
+  const { theme, toggleTheme } = useTheme();
   const devLoginAttemptedRef = useRef(false);
 
   const bffBaseUrl = useMemo(() => {
@@ -54,35 +52,9 @@ export default function AppShell({
   }, [bffBaseUrl]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const stored = window.localStorage.getItem("md_theme");
-    if (stored === "light" || stored === "dark") {
-      setTheme(stored);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof document === "undefined") {
-      return;
-    }
-    document.documentElement.setAttribute("data-theme", theme);
-    const themeColor = theme === "light" ? "#2a0552" : "#0f0e11";
-    const meta = document.querySelector(`meta[name="theme-color"]`);
-    if (meta) {
-      meta.setAttribute("content", themeColor);
-    }
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("md_theme", theme);
-    }
-  }, [theme]);
-
-  useEffect(() => {
     let alive = true;
     const devLogin = (process.env.NEXT_PUBLIC_DEV_AUTH_LOGIN || "").trim();
     const loadMe = async () => {
-      setMeStatus("loading");
       try {
         const response = await fetch(`${apiBaseUrl}/me`, {
           credentials: "include",
@@ -106,7 +78,7 @@ export default function AppShell({
                   await loadMe();
                   return;
                 }
-              } catch (error) {
+              } catch {
                 // Ignore dev login failures; fall back to unauthenticated state.
               }
             }
@@ -121,21 +93,18 @@ export default function AppShell({
         if (alive) {
           setMe(data);
         }
-      } catch (error) {
+      } catch {
         if (alive) {
           setMe(null);
         }
       } finally {
-        if (alive) {
-          setMeStatus("ready");
-        }
       }
     };
     void loadMe();
     return () => {
       alive = false;
     };
-  }, [bffBaseUrl]);
+  }, [apiBaseUrl, authBaseUrl]);
 
   const handleLogout = async () => {
     try {
@@ -167,12 +136,15 @@ export default function AppShell({
             <button
               className={styles.themeToggle}
               type="button"
-              onClick={() =>
-                setTheme((current) => (current === "light" ? "dark" : "light"))
-              }
+              onClick={toggleTheme}
             >
               {theme === "light" ? "Dark mode" : "Light mode"}
             </button>
+            {me?.role === "staff" ? (
+              <Link className={styles.auditButton} href="/audit">
+                Audit
+              </Link>
+            ) : null}
             {me ? (
               <Dropdown
                 label="User menu"

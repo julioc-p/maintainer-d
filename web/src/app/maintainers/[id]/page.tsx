@@ -4,6 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import MaintainerCard from "@/components/MaintainerCard";
+import MaintainerEditCard, {
+  CompanyOption,
+  MaintainerEditDraft,
+} from "@/components/MaintainerEditCard";
+import CompanyCreateModal from "@/components/CompanyCreateModal";
 import styles from "./page.module.css";
 
 type MaintainerDetail = {
@@ -13,8 +18,13 @@ type MaintainerDetail = {
   github: string;
   githubEmail: string;
   status: string;
+  companyId?: number | null;
   company?: string;
-  projects: string[];
+  projects: { id: number; name: string }[];
+  createdAt: string;
+  updatedAt: string;
+  updatedBy?: string;
+  deletedAt?: string | null;
 };
 
 const maintainerDataHasChanged = (
@@ -31,7 +41,12 @@ const maintainerDataHasChanged = (
     current.github !== next.github ||
     current.githubEmail !== next.githubEmail ||
     current.status !== next.status ||
-    current.company !== next.company
+    current.company !== next.company ||
+    current.companyId !== next.companyId ||
+    current.createdAt !== next.createdAt ||
+    current.updatedAt !== next.updatedAt ||
+    current.updatedBy !== next.updatedBy ||
+    current.deletedAt !== next.deletedAt
   ) {
     return true;
   }
@@ -39,7 +54,10 @@ const maintainerDataHasChanged = (
     return true;
   }
   for (let index = 0; index < current.projects.length; index += 1) {
-    if (current.projects[index] !== next.projects[index]) {
+    if (
+      current.projects[index].id !== next.projects[index].id ||
+      current.projects[index].name !== next.projects[index].name
+    ) {
       return true;
     }
   }
@@ -50,6 +68,18 @@ export default function MaintainerPage() {
   const [maintainer, setMaintainer] = useState<MaintainerDetail | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "ready">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [role, setRole] = useState<string | null>(null);
+  const [companies, setCompanies] = useState<CompanyOption[]>([]);
+  const [editDraft, setEditDraft] = useState<MaintainerEditDraft | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving">("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
+  const [companyDraftName, setCompanyDraftName] = useState("");
+  const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
+  const [companySaveStatus, setCompanySaveStatus] = useState<"idle" | "saving">("idle");
+  const [companySaveError, setCompanySaveError] = useState<string | null>(null);
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const maintainerId = params?.id;
@@ -68,6 +98,8 @@ export default function MaintainerPage() {
     }
     return `${bffBaseUrl}/api`;
   }, [bffBaseUrl]);
+
+  const canEdit = role === "staff";
 
   useEffect(() => {
     let alive = true;
@@ -98,7 +130,7 @@ export default function MaintainerPage() {
         if (alive && maintainerDataHasChanged(maintainer, data)) {
           setMaintainer(data);
         }
-      } catch (err) {
+      } catch {
         if (alive && error !== "Unable to load maintainer") {
           setError("Unable to load maintainer");
         }
@@ -110,13 +142,205 @@ export default function MaintainerPage() {
     };
 
     void loadMaintainer();
-    const intervalId = window.setInterval(loadMaintainer, pollIntervalMs);
+    let intervalId: number | null = null;
+    if (!isEditing) {
+      intervalId = window.setInterval(loadMaintainer, pollIntervalMs);
+    }
 
     return () => {
       alive = false;
-      window.clearInterval(intervalId);
+      if (intervalId) {
+        window.clearInterval(intervalId);
+      }
     };
-  }, [bffBaseUrl, error, maintainer, maintainerId, pollIntervalMs, router]);
+  }, [apiBaseUrl, error, isEditing, maintainer, maintainerId, pollIntervalMs, router]);
+
+  useEffect(() => {
+    let alive = true;
+    const loadRole = async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/me`, { credentials: "include" });
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as { role?: string };
+        if (alive) {
+          setRole(data.role || null);
+        }
+      } catch {
+        // Ignore.
+      }
+    };
+    void loadRole();
+    return () => {
+      alive = false;
+    };
+  }, [apiBaseUrl]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!canEdit) {
+      return () => {
+        alive = false;
+      };
+    }
+    const loadCompanies = async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/companies`, {
+          credentials: "include",
+        });
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as CompanyOption[];
+        if (alive) {
+          setCompanies(data.sort((a, b) => a.name.localeCompare(b.name)));
+        }
+      } catch {
+        // Ignore.
+      }
+    };
+    void loadCompanies();
+    return () => {
+      alive = false;
+    };
+  }, [apiBaseUrl, canEdit]);
+
+  useEffect(() => {
+    if (!maintainer || isEditing) {
+      return;
+    }
+    setEditDraft({
+      email: maintainer.email || "",
+      github: maintainer.github || "",
+      status: maintainer.status || "Active",
+      companyId: maintainer.companyId ?? null,
+    });
+  }, [isEditing, maintainer]);
+
+  const isDirty =
+    !!maintainer &&
+    !!editDraft &&
+    (maintainer.email !== editDraft.email ||
+      maintainer.github !== editDraft.github ||
+      maintainer.status !== editDraft.status ||
+      (maintainer.companyId ?? null) !== editDraft.companyId);
+
+  useEffect(() => {
+    if (!saveNotice) {
+      return;
+    }
+    const timer = window.setTimeout(() => setSaveNotice(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [saveNotice]);
+
+  const handleSave = async () => {
+    if (!maintainer || !editDraft) {
+      return;
+    }
+    setSaveStatus("saving");
+    setSaveError(null);
+    try {
+      const response = await fetch(`${apiBaseUrl}/maintainers/${maintainer.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          email: editDraft.email,
+          github: editDraft.github,
+          status: editDraft.status,
+          companyId: editDraft.companyId,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`unexpected status ${response.status}`);
+      }
+      const data = (await response.json()) as MaintainerDetail;
+      setMaintainer((prev) =>
+        prev ? (maintainerDataHasChanged(prev, data) ? data : prev) : data
+      );
+      setSaveNotice("Updated just now");
+      setIsEditing(false);
+    } catch {
+      setSaveError("Unable to update maintainer");
+    } finally {
+      setSaveStatus("idle");
+    }
+  };
+
+  const handleCreateCompany = async () => {
+    const trimmed = companyDraftName.trim();
+    if (!trimmed) {
+      setCompanySaveError("Company name is required");
+      return;
+    }
+    if (selectedCompanyId) {
+      setEditDraft((prev) =>
+        prev ? { ...prev, companyId: selectedCompanyId } : prev
+      );
+      setIsCompanyModalOpen(false);
+      setCompanySaveError(null);
+      return;
+    }
+    setCompanySaveStatus("saving");
+    setCompanySaveError(null);
+    try {
+      const response = await fetch(`${apiBaseUrl}/companies`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (response.status === 409) {
+        setCompanySaveError("Company already exists");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`unexpected status ${response.status}`);
+      }
+      const created = (await response.json()) as CompanyOption;
+      setCompanies((prev) =>
+        [...prev, created].sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setEditDraft((prev) =>
+        prev ? { ...prev, companyId: created.id } : prev
+      );
+      setCompanyDraftName("");
+      setIsCompanyModalOpen(false);
+    } catch {
+      setCompanySaveError("Unable to add company");
+    } finally {
+      setCompanySaveStatus("idle");
+    }
+  };
+
+  const companySuggestions = useMemo(() => {
+    const query = companyDraftName.trim().toLowerCase();
+    if (query.length < 2) {
+      return [];
+    }
+    return companies
+      .filter((company) => company.name.toLowerCase().includes(query))
+      .slice(0, 8);
+  }, [companies, companyDraftName]);
+
+  const handleCompanyDraftChange = (next: string) => {
+    setCompanyDraftName(next);
+    const trimmed = next.trim().toLowerCase();
+    if (!trimmed) {
+      setSelectedCompanyId(null);
+      return;
+    }
+    const selected = companies.find((company) => company.id === selectedCompanyId);
+    if (!selected || selected.name.toLowerCase() !== trimmed) {
+      setSelectedCompanyId(null);
+    }
+  };
+
+  const handleSelectCompany = (company: CompanyOption) => {
+    setCompanyDraftName(company.name);
+    setSelectedCompanyId(company.id);
+  };
 
   return (
     <AppShell>
@@ -124,6 +348,55 @@ export default function MaintainerPage() {
         <div className={styles.container}>
           {status === "loading" && <div className={styles.banner}>Loading…</div>}
           {error && <div className={styles.banner}>{error}</div>}
+          {canEdit && maintainer && editDraft && (
+            <MaintainerEditCard
+              draft={editDraft}
+              companies={companies}
+              isEditing={isEditing}
+              isDirty={isDirty}
+              saveStatus={saveStatus}
+              saveError={saveError}
+              disableCompanyAdd={companySaveStatus === "saving"}
+              onEdit={() => {
+                setIsEditing(true);
+                setSaveError(null);
+              }}
+              onCancel={() => {
+                setIsEditing(false);
+                setSaveError(null);
+                setEditDraft({
+                  email: maintainer.email || "",
+                  github: maintainer.github || "",
+                  status: maintainer.status || "Active",
+                  companyId: maintainer.companyId ?? null,
+                });
+              }}
+              onChange={(next) => setEditDraft(next)}
+              onSave={handleSave}
+              onAddCompany={() => {
+                setCompanyDraftName("");
+                setSelectedCompanyId(null);
+                setCompanySaveError(null);
+                setIsCompanyModalOpen(true);
+              }}
+            />
+          )}
+          {canEdit && isCompanyModalOpen && (
+            <CompanyCreateModal
+              name={companyDraftName}
+              error={companySaveError}
+              isSaving={companySaveStatus === "saving"}
+              suggestions={companySuggestions}
+              selectedCompanyId={selectedCompanyId}
+              onChange={handleCompanyDraftChange}
+              onSelectCompany={handleSelectCompany}
+              onClose={() => {
+                setIsCompanyModalOpen(false);
+                setCompanySaveError(null);
+              }}
+              onSubmit={handleCreateCompany}
+            />
+          )}
           {maintainer && (
             <MaintainerCard
               name={maintainer.name}
@@ -133,6 +406,10 @@ export default function MaintainerPage() {
               status={maintainer.status}
               company={maintainer.company}
               projects={maintainer.projects}
+              createdAt={maintainer.createdAt}
+              updatedAt={maintainer.updatedAt}
+              updatedBy={maintainer.updatedBy}
+              updatedNotice={saveNotice}
             />
           )}
         </div>
