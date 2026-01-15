@@ -17,6 +17,7 @@ rules:
   - maintainer-d.cncf.io
   resources:
   - projects
+  - staffmembers
   verbs:
   - get
   - list

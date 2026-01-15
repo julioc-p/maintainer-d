@@ -187,3 +187,39 @@ func (c *Client) WorkspaceExists(ctx context.Context, workspaceName string) (boo
 	}
 	return info != nil, nil
 }
+
+// ListManagedWorkspaces lists all workspaces managed by the kdp-workspace operator
+// Returns only Ready workspaces with the "managed-by=kdp-ws-operator" annotation
+func (c *Client) ListManagedWorkspaces(ctx context.Context) ([]*WorkspaceInfo, error) {
+	workspacePath := logicalcluster.NewPath(c.config.WorkspacePath)
+	clusterClient := c.GetClusterClient()
+
+	wsList, err := clusterClient.Cluster(workspacePath).TenancyV1alpha1().Workspaces().List(
+		ctx, metav1.ListOptions{},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list workspaces: %w", err)
+	}
+
+	var result []*WorkspaceInfo
+	for _, ws := range wsList.Items {
+		// Filter by annotation - only include workspaces managed by this operator
+		if ws.Annotations["managed-by"] != "kdp-ws-operator" {
+			continue
+		}
+
+		// Only include Ready workspaces
+		if ws.Status.Phase != corev1alpha1.LogicalClusterPhaseReady {
+			continue
+		}
+
+		result = append(result, &WorkspaceInfo{
+			Name:  ws.Name,
+			URL:   ws.Spec.URL,
+			Phase: string(ws.Status.Phase),
+			Ready: true,
+		})
+	}
+
+	return result, nil
+}
