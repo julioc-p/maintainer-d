@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { Card } from "clo-ui/components/Card";
 import ReactMarkdown from "react-markdown";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { atomDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
@@ -121,6 +123,8 @@ const maintainerRefSchema = {
     td: ["align", "colspan", "rowspan"],
   },
 };
+
+const isYamlRef = (value: string) => /\.(ya?ml)(\?|#|$)/i.test(value);
 
 export default function ProjectReconciliationCard({
   name,
@@ -378,7 +382,19 @@ export default function ProjectReconciliationCard({
                   {refError ? <div className={styles.refError}>{refError}</div> : null}
                 </div>
               ) : null}
-              {refBody ? (
+            {refBody ? (
+              isYamlRef(refUrl) ? (
+                <div className={styles.refYaml}>
+                  <SyntaxHighlighter
+                    language="yaml"
+                    style={atomDark}
+                    customStyle={{ margin: 0, background: "transparent" }}
+                    codeTagProps={{ style: { fontFamily: "var(--font-geist-mono)" } }}
+                  >
+                    {refBody}
+                  </SyntaxHighlighter>
+                </div>
+              ) : (
                 <div className={styles.refMarkdown}>
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
@@ -387,13 +403,14 @@ export default function ProjectReconciliationCard({
                     {refBody}
                   </ReactMarkdown>
                 </div>
-              ) : (
-                <div className={styles.empty}>
-                  {refStatus === "fetched"
-                    ? "No maintainer ref contents available."
-                    : "Maintainer ref not available."}
-                </div>
-              )}
+              )
+            ) : (
+              <div className={styles.empty}>
+                {refStatus === "fetched"
+                  ? "No maintainer ref contents available."
+                  : "Maintainer ref not available."}
+              </div>
+            )}
             </div>
 
             <div className={styles.section}>

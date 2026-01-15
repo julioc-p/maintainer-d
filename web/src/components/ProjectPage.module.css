@@ -238,6 +238,16 @@
   overflow: auto;
 }
 
+.refYaml {
+  padding: 12px;
+  background: var(--md-surface, rgba(15, 23, 42, 0.04));
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  max-height: 420px;
+  overflow: auto;
+}
+
 .refMissing {
   display: flex;
   flex-direction: column;

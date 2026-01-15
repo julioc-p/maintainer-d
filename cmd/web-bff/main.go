@@ -541,8 +541,8 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 			Joins("LEFT JOIN maintainer_projects mp ON mp.project_id = projects.id").
 			Joins("LEFT JOIN maintainers maint ON maint.id = mp.maintainer_id").
 			Where(
-				"LOWER(projects.name) LIKE ? OR LOWER(maint.name) LIKE ? OR LOWER(maint.git_hub_account) LIKE ?",
-				like, like, like,
+				"LOWER(projects.name) LIKE ? OR LOWER(projects.maintainer_ref) LIKE ? OR LOWER(maint.name) LIKE ? OR LOWER(maint.git_hub_account) LIKE ?",
+				like, like, like, like,
 			)
 	}
 
@@ -1991,6 +1991,8 @@ func buildMaintainerRefLines(refBody string) map[string]string {
 	}
 	atRe := regexp.MustCompile(`(?i)(^|[^a-z0-9_-])@([a-z0-9-]{1,39})`)
 	urlRe := regexp.MustCompile(`(?i)github\.com/([a-z0-9-]{1,39})`)
+	listItemRe := regexp.MustCompile(`(?i)^\s*[-*]\s*([a-z0-9][a-z0-9-]{0,38})\b`)
+	keyRe := regexp.MustCompile(`(?i)^\s*github\s*:\s*([a-z0-9][a-z0-9-]{0,38})\b`)
 	for _, line := range lines {
 		for _, match := range atRe.FindAllStringSubmatch(line, -1) {
 			if len(match) < 3 {
@@ -2011,6 +2013,22 @@ func buildMaintainerRefLines(refBody string) map[string]string {
 			}
 			if _, ok := result[handle]; !ok {
 				result[handle] = strings.TrimSpace(line)
+			}
+		}
+		if match := listItemRe.FindStringSubmatch(line); len(match) > 1 {
+			handle := strings.ToLower(match[1])
+			if handle != "organizations" && handle != "orgs" && handle != "repos" {
+				if _, ok := result[handle]; !ok {
+					result[handle] = strings.TrimSpace(line)
+				}
+			}
+		}
+		if match := keyRe.FindStringSubmatch(line); len(match) > 1 {
+			handle := strings.ToLower(match[1])
+			if handle != "organizations" && handle != "orgs" && handle != "repos" {
+				if _, ok := result[handle]; !ok {
+					result[handle] = strings.TrimSpace(line)
+				}
 			}
 		}
 	}
@@ -2042,6 +2060,24 @@ func extractGitHubHandles(refBody string) map[string]struct{} {
 			continue
 		}
 		result[handle] = struct{}{}
+	}
+	// Match YAML list items like "- username"
+	listItemRe := regexp.MustCompile(`(?i)^\s*[-*]\s*([a-z0-9][a-z0-9-]{0,38})\b`)
+	// Match YAML key "github: username"
+	keyRe := regexp.MustCompile(`(?i)^\s*github\s*:\s*([a-z0-9][a-z0-9-]{0,38})\b`)
+	for _, line := range strings.Split(refBody, "\n") {
+		if match := listItemRe.FindStringSubmatch(line); len(match) > 1 {
+			handle := strings.ToLower(match[1])
+			if handle != "organizations" && handle != "orgs" && handle != "repos" {
+				result[handle] = struct{}{}
+			}
+		}
+		if match := keyRe.FindStringSubmatch(line); len(match) > 1 {
+			handle := strings.ToLower(match[1])
+			if handle != "organizations" && handle != "orgs" && handle != "repos" {
+				result[handle] = struct{}{}
+			}
+		}
 	}
 	return result
 }
