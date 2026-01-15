@@ -4,7 +4,9 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Dropdown } from "clo-ui/components/Dropdown";
 import { Footer } from "clo-ui/components/Footer";
 import { Navbar } from "clo-ui/components/Navbar";
+import { Searchbar } from "clo-ui/components/Searchbar";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTheme } from "./ThemeProvider";
 import styles from "./AppShell.module.css";
 
@@ -19,6 +21,33 @@ type MeResponse = {
   role: string;
 };
 
+const MoonIcon = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+    <path
+      d="M21 14.5A8.5 8.5 0 0 1 9.5 3a7 7 0 1 0 11.5 11.5Z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const SunIcon = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+    <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+    <path
+      d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 export default function AppShell({
   children,
   navCenter,
@@ -27,6 +56,17 @@ export default function AppShell({
   const [me, setMe] = useState<MeResponse | null>(null);
   const { theme, toggleTheme } = useTheme();
   const devLoginAttemptedRef = useRef(false);
+  const [mounted, setMounted] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [navQuery, setNavQuery] = useState(
+    () => searchParams.get("query") || ""
+  );
+
+  useEffect(() => {
+    const nextQuery = searchParams.get("query") || "";
+    setNavQuery((current) => (current === nextQuery ? current : nextQuery));
+  }, [searchParams]);
 
   const bffBaseUrl = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_BFF_BASE_URL || "/api";
@@ -106,6 +146,10 @@ export default function AppShell({
     };
   }, [apiBaseUrl, authBaseUrl]);
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const handleLogout = async () => {
     try {
       await fetch(`${authBaseUrl}/auth/logout`, {
@@ -118,6 +162,30 @@ export default function AppShell({
   };
 
   const userLabel = me ? `${me.login} · ${me.role}` : "";
+  const navSearchPlaceholder =
+    "Search projects, maintainers, companies, or roster URLs";
+  const navSearch =
+    navCenter === undefined ? (
+      <Searchbar
+        placeholder={navSearchPlaceholder}
+        value={navQuery}
+        onValueChange={setNavQuery}
+        onSearch={() => {
+          const params = new URLSearchParams();
+          if (navQuery.trim()) {
+            params.set("query", navQuery.trim());
+          }
+          const qs = params.toString();
+          router.push(qs ? `/?${qs}` : "/");
+        }}
+        cleanSearchValue={() => setNavQuery("")}
+        bigSize={false}
+        noButtons
+        classNameWrapper={styles.navSearch}
+      />
+    ) : (
+      navCenter
+    );
 
   return (
     <div className={styles.page}>
@@ -130,15 +198,23 @@ export default function AppShell({
             <div className={styles.alpha}>Alpha</div>
           </div>
           <div className={`${styles.navCenter} ${navCenterClassName ?? ""}`}>
-            {navCenter}
+            {navSearch}
           </div>
           <div className={styles.userArea}>
             <button
               className={styles.themeToggle}
               type="button"
               onClick={toggleTheme}
+              aria-label={
+                mounted
+                  ? theme === "light"
+                    ? "Enable dark mode"
+                    : "Enable light mode"
+                  : "Toggle theme"
+              }
+              suppressHydrationWarning
             >
-              {theme === "light" ? "Dark mode" : "Light mode"}
+              {mounted ? (theme === "light" ? <MoonIcon /> : <SunIcon />) : <MoonIcon />}
             </button>
             {me?.role === "staff" ? (
               <Link className={styles.auditButton} href="/audit">

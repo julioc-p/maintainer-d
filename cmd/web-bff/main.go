@@ -537,12 +537,15 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	}
 	if query != "" {
 		like := "%" + strings.ToLower(query) + "%"
+		compactQuery := strings.NewReplacer(" ", "", "-", "", "_", "").Replace(strings.ToLower(query))
+		compactLike := "%" + compactQuery + "%"
 		base = base.
 			Joins("LEFT JOIN maintainer_projects mp ON mp.project_id = projects.id").
 			Joins("LEFT JOIN maintainers maint ON maint.id = mp.maintainer_id").
+			Joins("LEFT JOIN companies comp ON comp.id = maint.company_id").
 			Where(
-				"LOWER(projects.name) LIKE ? OR LOWER(projects.maintainer_ref) LIKE ? OR LOWER(maint.name) LIKE ? OR LOWER(maint.git_hub_account) LIKE ?",
-				like, like, like, like,
+				"LOWER(projects.name) LIKE ? OR LOWER(projects.maintainer_ref) LIKE ? OR LOWER(maint.name) LIKE ? OR LOWER(maint.git_hub_account) LIKE ? OR LOWER(comp.name) LIKE ? OR REPLACE(REPLACE(REPLACE(LOWER(comp.name), ' ', ''), '-', ''), '_', '') LIKE ?",
+				like, like, like, like, like, compactLike,
 			)
 	}
 

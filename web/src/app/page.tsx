@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { FiltersSection } from "clo-ui/components/FiltersSection";
 import { Pagination } from "clo-ui/components/Pagination";
-import { Searchbar } from "clo-ui/components/Searchbar";
 import { SortOptions } from "clo-ui/components/SortOptions";
 import AppShell from "@/components/AppShell";
 import ProjectCard from "@/components/ProjectCard";
+import { useSearchParams } from "next/navigation";
 import styles from "./page.module.css";
 
 type Project = {
@@ -29,6 +29,7 @@ export default function Home() {
   const [sortBy, setSortBy] = useState("name");
   const [sortDirection, setSortDirection] = useState("asc");
   const [activeMaturity, setActiveMaturity] = useState<string[]>([]);
+  const searchParams = useSearchParams();
 
   const bffBaseUrl = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_BFF_BASE_URL || "/api";
@@ -44,9 +45,10 @@ export default function Home() {
     return `${bffBaseUrl}/api`;
   }, [bffBaseUrl]);
 
-  const handleSearch = () => {
-    // Placeholder: wire this to the BFF search endpoint.
-  };
+  useEffect(() => {
+    const nextQuery = searchParams.get("query") || "";
+    setQuery((current) => (current === nextQuery ? current : nextQuery));
+  }, [searchParams]);
 
   useEffect(() => {
     setPage(1);
@@ -133,21 +135,7 @@ export default function Home() {
   const rangeEnd = Math.min(offset + limit, totalProjects);
 
   return (
-    <AppShell
-      navCenter={
-        <Searchbar
-          placeholder="Search projects"
-          value={query}
-          onValueChange={setQuery}
-          onSearch={handleSearch}
-          cleanSearchValue={() => setQuery("")}
-          bigSize={false}
-          noButtons
-          classNameWrapper={styles.searchbarWrapper}
-        />
-      }
-      navCenterClassName={styles.navSearch}
-    >
+    <AppShell>
       <main className={styles.main}>
         {projectsStatus === "loading" && (
           <div className={styles.statusBanner}>Loading projects…</div>
