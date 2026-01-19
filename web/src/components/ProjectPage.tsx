@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { Card } from "clo-ui/components/Card";
 import ReactMarkdown from "react-markdown";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { atomDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
@@ -122,6 +124,8 @@ const maintainerRefSchema = {
   },
 };
 
+const isYamlRef = (value: string) => /\.(ya?ml)(\?|#|$)/i.test(value);
+
 export default function ProjectReconciliationCard({
   name,
   maturity,
@@ -185,7 +189,7 @@ export default function ProjectReconciliationCard({
         <div className={styles.columns}>
           <div className={styles.column}>
             <div className={styles.sectionHeader}>
-              <h2 className={styles.sectionTitle}>CNCF INTERNAL</h2>
+              <h2 className={styles.sectionTitle}>CNCF DATABASE</h2>
             </div>
 
             <div className={styles.section}>
@@ -378,7 +382,19 @@ export default function ProjectReconciliationCard({
                   {refError ? <div className={styles.refError}>{refError}</div> : null}
                 </div>
               ) : null}
-              {refBody ? (
+            {refBody ? (
+              isYamlRef(refUrl) ? (
+                <div className={styles.refYaml}>
+                  <SyntaxHighlighter
+                    language="yaml"
+                    style={atomDark}
+                    customStyle={{ margin: 0, background: "transparent" }}
+                    codeTagProps={{ style: { fontFamily: "var(--font-geist-mono)" } }}
+                  >
+                    {refBody}
+                  </SyntaxHighlighter>
+                </div>
+              ) : (
                 <div className={styles.refMarkdown}>
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
@@ -387,17 +403,18 @@ export default function ProjectReconciliationCard({
                     {refBody}
                   </ReactMarkdown>
                 </div>
-              ) : (
-                <div className={styles.empty}>
-                  {refStatus === "fetched"
-                    ? "No maintainer ref contents available."
-                    : "Maintainer ref not available."}
-                </div>
-              )}
+              )
+            ) : (
+              <div className={styles.empty}>
+                {refStatus === "fetched"
+                  ? "No maintainer ref contents available."
+                  : "Maintainer ref not available."}
+              </div>
+            )}
             </div>
 
             <div className={styles.section}>
-              <h3 className={styles.subSectionTitle}>Maintainers on GitHub, not in maintainer-d</h3>
+            <h3 className={styles.subSectionTitle}>NOT PRESENT ON CNCF DATABASE</h3>
               {refOnlyGitHub.length === 0 ? (
                 <div className={styles.empty}>None detected.</div>
               ) : (
@@ -405,14 +422,6 @@ export default function ProjectReconciliationCard({
                   {refOnlyGitHub.map((handle) => (
                     <li key={handle} className={styles.listItem}>
                       <div className={styles.listRow}>
-                        <a
-                          className={styles.link}
-                          href={`https://github.com/${handle}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          @{handle}
-                        </a>
                         {canEdit ? (
                           <button
                             className={styles.addButton}
@@ -429,9 +438,17 @@ export default function ProjectReconciliationCard({
                               setModalOpen(true);
                             }}
                           >
-                            Add to maintainer-d
+                            ADD MAINTAINER
                           </button>
                         ) : null}
+                        <a
+                          className={styles.link}
+                          href={`https://github.com/${handle}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          @{handle}
+                        </a>
                       </div>
                     </li>
                   ))}

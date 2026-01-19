@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -325,8 +326,13 @@ func (s *server) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	login := strings.ToLower(ghUser.GetLogin())
 	role, authorized := s.authorizeLogin(login)
+	attemptRole := role
 	if !authorized {
-		s.logger.Printf("web-bff: unauthorized login attempt from github user %q", login)
+		attemptRole = "unauthorized"
+	}
+	s.logger.Printf("web-bff: login attempt user=%s role=%s ip=%s", login, attemptRole, clientIP(r))
+	if !authorized {
+		s.logger.Printf("web-bff: unauthorized login attempt from github user %q ip=%s", login, clientIP(r))
 		http.Error(w, "unauthorized", http.StatusForbidden)
 		return
 	}
@@ -358,6 +364,11 @@ func (s *server) handleTestLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	role, authorized := s.authorizeLogin(login)
+	attemptRole := role
+	if !authorized {
+		attemptRole = "unauthorized"
+	}
+	s.logger.Printf("web-bff: login attempt user=%s role=%s ip=%s", login, attemptRole, clientIP(r))
 	if !authorized {
 		http.Error(w, "unauthorized", http.StatusForbidden)
 		return
@@ -438,9 +449,14 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := map[string]string{
+	response := map[string]any{
 		"login": session.Login,
 		"role":  session.Role,
+	}
+	if session.Role == roleMaintainer {
+		if maintainer, err := s.getMaintainerByLogin(session.Login); err == nil {
+			response["maintainerId"] = maintainer.ID
+		}
 	}
 	w.Header().Set(headerContentType, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -509,9 +525,32 @@ type projectDetailResponse struct {
 	CreatedAt         time.Time                 `json:"createdAt"`
 	UpdatedAt         time.Time                 `json:"updatedAt"`
 	DeletedAt         *time.Time                `json:"deletedAt,omitempty"`
+	UpdatedBy         string                    `json:"updatedBy,omitempty"`
+	UpdatedAuditID    *uint                     `json:"updatedAuditId,omitempty"`
 }
 
 func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
+	session := sessionFromContext(r.Context())
+	if session == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var maintainerID uint
+	if session.Role == roleMaintainer {
+		maintainer, err := s.getMaintainerByLogin(session.Login)
+		if err != nil {
+			s.logger.Printf("web-bff: access denied projects user=%s role=%s reason=maintainer_lookup_failed err=%v", session.Login, session.Role, err)
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		maintainerID = maintainer.ID
+		s.logger.Printf("web-bff: projects visible to maintainer user=%s id=%d", session.Login, maintainerID)
+	} else if session.Role != roleStaff {
+		s.logger.Printf("web-bff: access denied projects user=%s role=%s reason=role_not_allowed", session.Login, session.Role)
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
 	query := strings.TrimSpace(r.URL.Query().Get("query"))
 	limit := parseIntParam(r, "limit", 20, 1, 100)
 	offset := parseIntParam(r, "offset", 0, 0, 10_000_000)
@@ -535,12 +574,15 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	}
 	if query != "" {
 		like := "%" + strings.ToLower(query) + "%"
+		compactQuery := strings.NewReplacer(" ", "", "-", "", "_", "").Replace(strings.ToLower(query))
+		compactLike := "%" + compactQuery + "%"
 		base = base.
 			Joins("LEFT JOIN maintainer_projects mp ON mp.project_id = projects.id").
 			Joins("LEFT JOIN maintainers maint ON maint.id = mp.maintainer_id").
+			Joins("LEFT JOIN companies comp ON comp.id = maint.company_id").
 			Where(
-				"LOWER(projects.name) LIKE ? OR LOWER(maint.name) LIKE ? OR LOWER(maint.git_hub_account) LIKE ?",
-				like, like, like,
+				"LOWER(projects.name) LIKE ? OR LOWER(projects.maintainer_ref) LIKE ? OR LOWER(maint.name) LIKE ? OR LOWER(maint.git_hub_account) LIKE ? OR LOWER(comp.name) LIKE ? OR REPLACE(REPLACE(REPLACE(LOWER(comp.name), ' ', ''), '-', ''), '_', '') LIKE ?",
+				like, like, like, like, like, compactLike,
 			)
 	}
 
@@ -549,6 +591,9 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 		s.logger.Printf("web-bff: handleProjects count error: %v", err)
 		http.Error(w, "failed to count projects", http.StatusInternalServerError)
 		return
+	}
+	if session.Role == roleMaintainer && total == 0 {
+		s.logger.Printf("web-bff: projects empty for maintainer user=%s id=%d query=%q maturity=%v", session.Login, maintainerID, query, maturityFilters)
 	}
 
 	order := "projects." + sortBy + " " + direction
@@ -612,6 +657,10 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPatch {
+		if strings.HasSuffix(r.URL.Path, "/maturity") {
+			s.handleProjectMaturityUpdate(w, r)
+			return
+		}
 		s.handleProjectMaintainerRefUpdate(w, r)
 		return
 	}
@@ -621,12 +670,12 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session := sessionFromContext(r.Context())
-	login := "anonymous"
-	role := "unknown"
-	if session != nil {
-		login = session.Login
-		role = session.Role
+	if session == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
 	}
+	login := session.Login
+	role := session.Role
 	s.logger.Printf("web-bff: project lookup id=%d path=%s user=%s role=%s", id, r.URL.Path, login, role)
 
 	project, err := s.store.GetProjectByID(id)
@@ -638,6 +687,17 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 		}
 		s.logger.Printf("web-bff: failed to load project id=%d path=%s user=%s role=%s err=%v", id, r.URL.Path, login, role, err)
 		http.Error(w, "failed to load project", http.StatusInternalServerError)
+		return
+	}
+	if session.Role == roleMaintainer {
+		if _, err := s.getMaintainerByLogin(session.Login); err != nil {
+			s.logger.Printf("web-bff: maintainer access denied project=%d user=%s role=%s reason=%v", id, session.Login, session.Role, err)
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+	} else if session.Role != roleStaff {
+		s.logger.Printf("web-bff: access denied project=%d user=%s role=%s reason=role_not_allowed", id, session.Login, session.Role)
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -662,7 +722,7 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 			refLines = buildMaintainerRefLines(body)
 		}
 	}
-	if role != roleStaff {
+	if role != roleStaff && role != roleMaintainer {
 		refBody = ""
 		refLines = nil
 	}
@@ -685,6 +745,24 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 		ts := project.DeletedAt.Time
 		deletedAt = &ts
 	}
+	var updatedBy string
+	var updatedAuditID *uint
+	var audit model.AuditLog
+	if err := s.store.DB().
+		Where("project_id = ? AND action IN ?", id, []string{"PROJECT_MAINTAINER_REF_UPDATE", "PROJECT_MATURITY_UPDATE"}).
+		Order("created_at desc").
+		First(&audit).Error; err == nil {
+		if audit.StaffID != nil {
+			var staff model.StaffMember
+			if err := s.store.DB().First(&staff, *audit.StaffID).Error; err == nil {
+				updatedBy = staff.Name
+			}
+		}
+		if updatedBy == "" {
+			updatedBy = "Staff"
+		}
+		updatedAuditID = &audit.ID
+	}
 
 	response := projectDetailResponse{
 		ID:                project.ID,
@@ -700,6 +778,8 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:         project.CreatedAt,
 		UpdatedAt:         project.UpdatedAt,
 		DeletedAt:         deletedAt,
+		UpdatedBy:         updatedBy,
+		UpdatedAuditID:    updatedAuditID,
 	}
 
 	maintainerRef := strings.TrimSpace(project.MaintainerRef)
@@ -729,6 +809,10 @@ type projectMaintainerRefUpdateRequest struct {
 	MaintainerRef string `json:"maintainerRef"`
 }
 
+type projectMaturityUpdateRequest struct {
+	Maturity string `json:"maturity"`
+}
+
 func (s *server) handleProjectMaintainerRefUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
@@ -754,6 +838,16 @@ func (s *server) handleProjectMaintainerRefUpdate(w http.ResponseWriter, r *http
 		http.Error(w, "maintainerRef must be a URL", http.StatusBadRequest)
 		return
 	}
+	beforeProject, beforeErr := s.store.GetProjectByID(id)
+	if beforeErr != nil {
+		if errors.Is(beforeErr, db.ErrProjectNotFound) {
+			http.Error(w, "project not found", http.StatusNotFound)
+			return
+		}
+		s.logger.Printf("web-bff: load project before maintainerRef update failed id=%d err=%v", id, beforeErr)
+		http.Error(w, "failed to update project", http.StatusInternalServerError)
+		return
+	}
 	if err := s.store.UpdateProjectMaintainerRef(id, ref); err != nil {
 		if errors.Is(err, db.ErrProjectNotFound) {
 			http.Error(w, "project not found", http.StatusNotFound)
@@ -763,6 +857,140 @@ func (s *server) handleProjectMaintainerRefUpdate(w http.ResponseWriter, r *http
 		http.Error(w, "failed to update project", http.StatusInternalServerError)
 		return
 	}
+	var staffID *uint
+	staffName := ""
+	if session.Login != "" {
+		var staff model.StaffMember
+		if err := s.store.DB().
+			Where("LOWER(git_hub_account) = ?", strings.ToLower(session.Login)).
+			First(&staff).Error; err == nil {
+			staffID = &staff.ID
+			staffName = staff.Name
+		}
+	}
+	if staffName == "" {
+		staffName = session.Login
+	}
+	changes := map[string]map[string]string{
+		"maintainerRef": {
+			"from": strings.TrimSpace(beforeProject.MaintainerRef),
+			"to":   ref,
+		},
+	}
+	metadata := map[string]any{
+		"actor": map[string]string{
+			"login": session.Login,
+			"role":  session.Role,
+		},
+		"changes": changes,
+	}
+	if metadataJSON, err := json.Marshal(metadata); err != nil {
+		s.logger.Printf("web-bff: update maintainerRef audit metadata encode error: %v", err)
+	} else {
+		event := model.AuditLog{
+			ProjectID: &id,
+			StaffID:   staffID,
+			Action:    "PROJECT_MAINTAINER_REF_UPDATE",
+			Message:   fmt.Sprintf("Project maintainer ref updated by %s", staffName),
+			Metadata:  string(metadataJSON),
+		}
+		if err := s.store.DB().Create(&event).Error; err != nil {
+			s.logger.Printf("web-bff: update maintainerRef audit log failed: %v", err)
+		}
+	}
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		s.logger.Printf("web-bff: handleProject update encode error: %v", err)
+	}
+}
+
+func (s *server) handleProjectMaturityUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	trimmed := strings.TrimSuffix(r.URL.Path, "/maturity")
+	id, err := parseIDParam(trimmed, "/api/projects/")
+	if err != nil {
+		http.Error(w, "invalid project id", http.StatusBadRequest)
+		return
+	}
+	session := sessionFromContext(r.Context())
+	if session == nil || session.Role != roleStaff {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var req projectMaturityUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	next, ok := parseMaturity(req.Maturity)
+	if !ok {
+		http.Error(w, "invalid maturity", http.StatusBadRequest)
+		return
+	}
+	project, err := s.store.GetProjectByID(id)
+	if err != nil {
+		if errors.Is(err, db.ErrProjectNotFound) {
+			http.Error(w, "project not found", http.StatusNotFound)
+			return
+		}
+		s.logger.Printf("web-bff: load project before maturity update failed id=%d err=%v", id, err)
+		http.Error(w, "failed to update project", http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.UpdateProjectMaturity(id, next); err != nil {
+		if errors.Is(err, db.ErrProjectNotFound) {
+			http.Error(w, "project not found", http.StatusNotFound)
+			return
+		}
+		s.logger.Printf("web-bff: update maturity failed id=%d err=%v", id, err)
+		http.Error(w, "failed to update project", http.StatusInternalServerError)
+		return
+	}
+
+	var staffID *uint
+	staffName := ""
+	if session.Login != "" {
+		var staff model.StaffMember
+		if err := s.store.DB().
+			Where("LOWER(git_hub_account) = ?", strings.ToLower(session.Login)).
+			First(&staff).Error; err == nil {
+			staffID = &staff.ID
+			staffName = staff.Name
+		}
+	}
+	if staffName == "" {
+		staffName = session.Login
+	}
+	metadata := map[string]any{
+		"actor": map[string]string{
+			"login": session.Login,
+			"role":  session.Role,
+		},
+		"changes": map[string]map[string]string{
+			"maturity": {
+				"from": string(project.Maturity),
+				"to":   string(next),
+			},
+		},
+	}
+	if metadataJSON, err := json.Marshal(metadata); err != nil {
+		s.logger.Printf("web-bff: update maturity audit metadata encode error: %v", err)
+	} else {
+		event := model.AuditLog{
+			ProjectID: &id,
+			StaffID:   staffID,
+			Action:    "PROJECT_MATURITY_UPDATE",
+			Message:   fmt.Sprintf("Project maturity updated by %s", staffName),
+			Metadata:  string(metadataJSON),
+		}
+		if err := s.store.DB().Create(&event).Error; err != nil {
+			s.logger.Printf("web-bff: update maturity audit log failed: %v", err)
+		}
+	}
+
 	w.Header().Set(headerContentType, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
 		s.logger.Printf("web-bff: handleProject update encode error: %v", err)
@@ -820,13 +1048,27 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session := sessionFromContext(r.Context())
-	login := "anonymous"
-	role := "unknown"
-	if session != nil {
-		login = session.Login
-		role = session.Role
+	if session == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
 	}
+	login := session.Login
+	role := session.Role
 	s.logger.Printf("web-bff: maintainer lookup id=%d path=%s user=%s role=%s", id, r.URL.Path, login, role)
+	var requester *model.Maintainer
+	if session.Role == roleMaintainer {
+		maintainer, err := s.getMaintainerByLogin(session.Login)
+		if err != nil {
+			s.logger.Printf("web-bff: maintainer access denied target=%d user=%s role=%s reason=%v", id, session.Login, session.Role, err)
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		requester = maintainer
+	} else if session.Role != roleStaff {
+		s.logger.Printf("web-bff: access denied target=%d user=%s role=%s reason=role_not_allowed", id, session.Login, session.Role)
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 
 	switch r.Method {
 	case http.MethodGet:
@@ -884,12 +1126,25 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 		}
 
 		w.Header().Set(headerContentType, contentTypeJSON)
+		isSelf := requester != nil && requester.ID == id
+		if session.Role != roleStaff && !isSelf {
+			response.Email = ""
+			response.GitHubEmail = ""
+		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
 			s.logger.Printf("web-bff: handleMaintainer encode error: %v", err)
 		}
 		return
 	case http.MethodPatch, http.MethodPut:
-		if session == nil || session.Role != roleStaff {
+		maintainerEditSelf := false
+		if session.Role == roleMaintainer {
+			requester, err := s.getMaintainerByLogin(session.Login)
+			if err != nil || requester.ID != id {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			maintainerEditSelf = true
+		} else if session.Role != roleStaff {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -909,6 +1164,10 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		status := model.MaintainerStatus(strings.TrimSpace(req.Status))
+		if maintainerEditSelf {
+			status = before.MaintainerStatus
+			req.GitHub = before.GitHubAccount
+		}
 		if !status.IsValid() {
 			http.Error(w, "invalid status", http.StatusBadRequest)
 			return
@@ -1245,8 +1504,8 @@ type companyDuplicateGroup struct {
 
 func (s *server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 	session := sessionFromContext(r.Context())
-	if session == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	if session == nil || (session.Role != roleStaff && session.Role != roleMaintainer) {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -1305,7 +1564,7 @@ func (s *server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 			s.logger.Printf("web-bff: handleCompanies encode error: %v", err)
 		}
 	case http.MethodPost:
-		if session.Role != roleStaff {
+		if session.Role != roleStaff && session.Role != roleMaintainer {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -1322,6 +1581,52 @@ func (s *server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 			}
 			http.Error(w, "failed to create company", http.StatusBadRequest)
 			return
+		}
+		var staffID *uint
+		var maintainerID *uint
+		actorName := session.Login
+		if session.Role == roleStaff && session.Login != "" {
+			var staff model.StaffMember
+			if err := s.store.DB().
+				Where("LOWER(git_hub_account) = ?", strings.ToLower(session.Login)).
+				First(&staff).Error; err == nil {
+				staffID = &staff.ID
+				if staff.Name != "" {
+					actorName = staff.Name
+				}
+			}
+		}
+		if session.Role == roleMaintainer && session.Login != "" {
+			if maintainer, err := s.getMaintainerByLogin(session.Login); err == nil {
+				maintainerID = &maintainer.ID
+				if strings.TrimSpace(maintainer.Name) != "" {
+					actorName = maintainer.Name
+				}
+			}
+		}
+		metadata := map[string]any{
+			"actor": map[string]string{
+				"login": session.Login,
+				"role":  session.Role,
+			},
+			"company": map[string]any{
+				"id":   company.ID,
+				"name": company.Name,
+			},
+		}
+		if metadataJSON, err := json.Marshal(metadata); err != nil {
+			s.logger.Printf("web-bff: create company audit metadata encode error: %v", err)
+		} else {
+			event := model.AuditLog{
+				StaffID:      staffID,
+				MaintainerID: maintainerID,
+				Action:       "COMPANY_CREATE",
+				Message:      fmt.Sprintf("Company created by %s", actorName),
+				Metadata:     string(metadataJSON),
+			}
+			if err := s.store.DB().Create(&event).Error; err != nil {
+				s.logger.Printf("web-bff: create company audit log failed: %v", err)
+			}
 		}
 		w.Header().Set(headerContentType, contentTypeJSON)
 		if err := json.NewEncoder(w).Encode(companyResponse{ID: company.ID, Name: company.Name}); err != nil {
@@ -1426,6 +1731,26 @@ func (s *server) requireSession(next http.Handler) http.Handler {
 	})
 }
 
+func clientIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		parts := strings.Split(forwarded, ",")
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
+		return realIP
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
 func (s *server) authorizeLogin(login string) (string, bool) {
 	if login == "" {
 		return "", false
@@ -1457,6 +1782,22 @@ func (s *server) authorizeLogin(login string) (string, bool) {
 	}
 
 	return "", false
+}
+
+func (s *server) getMaintainerByLogin(login string) (*model.Maintainer, error) {
+	if strings.TrimSpace(login) == "" {
+		return nil, fmt.Errorf("missing login")
+	}
+	var maintainer model.Maintainer
+	if err := s.store.DB().
+		Where("LOWER(git_hub_account) = ?", strings.ToLower(login)).
+		First(&maintainer).Error; err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(maintainer.GitHubAccount) == "" || maintainer.GitHubAccount == "GITHUB_MISSING" {
+		return nil, fmt.Errorf("maintainer has no github account")
+	}
+	return &maintainer, nil
 }
 
 func fetchGitHubUser(ctx context.Context, token *oauth2.Token) (*github.User, error) {
@@ -1646,6 +1987,21 @@ func parseIDParam(path, prefix string) (uint, error) {
 	return uint(value), nil
 }
 
+func parseMaturity(value string) (model.Maturity, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "sandbox":
+		return model.Sandbox, true
+	case "incubating":
+		return model.Incubating, true
+	case "graduated":
+		return model.Graduated, true
+	case "archived":
+		return model.Archived, true
+	default:
+		return "", false
+	}
+}
+
 func normalizeValue(value, sentinel string) string {
 	if value == sentinel {
 		return ""
@@ -1802,6 +2158,8 @@ func buildMaintainerRefLines(refBody string) map[string]string {
 	}
 	atRe := regexp.MustCompile(`(?i)(^|[^a-z0-9_-])@([a-z0-9-]{1,39})`)
 	urlRe := regexp.MustCompile(`(?i)github\.com/([a-z0-9-]{1,39})`)
+	listItemRe := regexp.MustCompile(`(?i)^\s*[-*]\s*([a-z0-9][a-z0-9-]{0,38})\b`)
+	keyRe := regexp.MustCompile(`(?i)^\s*github\s*:\s*([a-z0-9][a-z0-9-]{0,38})\b`)
 	for _, line := range lines {
 		for _, match := range atRe.FindAllStringSubmatch(line, -1) {
 			if len(match) < 3 {
@@ -1822,6 +2180,22 @@ func buildMaintainerRefLines(refBody string) map[string]string {
 			}
 			if _, ok := result[handle]; !ok {
 				result[handle] = strings.TrimSpace(line)
+			}
+		}
+		if match := listItemRe.FindStringSubmatch(line); len(match) > 1 {
+			handle := strings.ToLower(match[1])
+			if handle != "organizations" && handle != "orgs" && handle != "repos" {
+				if _, ok := result[handle]; !ok {
+					result[handle] = strings.TrimSpace(line)
+				}
+			}
+		}
+		if match := keyRe.FindStringSubmatch(line); len(match) > 1 {
+			handle := strings.ToLower(match[1])
+			if handle != "organizations" && handle != "orgs" && handle != "repos" {
+				if _, ok := result[handle]; !ok {
+					result[handle] = strings.TrimSpace(line)
+				}
 			}
 		}
 	}
@@ -1853,6 +2227,24 @@ func extractGitHubHandles(refBody string) map[string]struct{} {
 			continue
 		}
 		result[handle] = struct{}{}
+	}
+	// Match YAML list items like "- username"
+	listItemRe := regexp.MustCompile(`(?i)^\s*[-*]\s*([a-z0-9][a-z0-9-]{0,38})\b`)
+	// Match YAML key "github: username"
+	keyRe := regexp.MustCompile(`(?i)^\s*github\s*:\s*([a-z0-9][a-z0-9-]{0,38})\b`)
+	for _, line := range strings.Split(refBody, "\n") {
+		if match := listItemRe.FindStringSubmatch(line); len(match) > 1 {
+			handle := strings.ToLower(match[1])
+			if handle != "organizations" && handle != "orgs" && handle != "repos" {
+				result[handle] = struct{}{}
+			}
+		}
+		if match := keyRe.FindStringSubmatch(line); len(match) > 1 {
+			handle := strings.ToLower(match[1])
+			if handle != "organizations" && handle != "orgs" && handle != "repos" {
+				result[handle] = struct{}{}
+			}
+		}
 	}
 	return result
 }

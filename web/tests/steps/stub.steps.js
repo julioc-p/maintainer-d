@@ -4,7 +4,6 @@ const pending = function () {
   return "pending";
 };
 
-Given("the maintainer-d database contains staff, maintainers, and projects", pending);
 Given("the maintainer-d database contains staff and maintainer GitHub accounts", pending);
 Given("a staff GitHub account {string} exists in the database", pending);
 Given("a maintainer GitHub account {string} exists in the database", pending);
@@ -38,7 +37,6 @@ Given("I am signed in as a maintainer for project {string}", async function (_pr
   await this.page.goto(this.baseUrl);
 });
 
-When("I view the projects list", pending);
 When("I view project {string}", pending);
 When("I view the staff dashboard", pending);
 When("I view the staff dashboard", pending);
@@ -46,10 +44,6 @@ When("I attempt to view project {string}", pending);
 When("I attempt to edit project {string}", pending);
 When(
   "I edit the {string} record {string} with field {string} set to {string}",
-  pending
-);
-When(
-  "I edit my maintainer profile with field {string} set to {string}",
   pending
 );
 When(
@@ -62,7 +56,6 @@ When("I attempt to access a protected page", pending);
 
 Then("I can see all projects", pending);
 Then("I can see all maintainers", pending);
-Then("project {string} is visible", pending);
 Then("maintainer {string} is visible", pending);
 Then("I can see all services the project is setup on", pending);
 Then("I can see project {string} data", pending);

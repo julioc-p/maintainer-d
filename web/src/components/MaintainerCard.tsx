@@ -115,11 +115,11 @@ export default function MaintainerCard({
 
         <div className={styles.section}>
           <h2 className={styles.sectionTitle}>Contact</h2>
-          <div className={styles.detailRow}>
-            <span className={styles.detailLabel}>Email</span>
-            <span className={styles.detailValue}>
-              {email || "—"}
-              {hasEmail ? (
+          {hasEmail ? (
+            <div className={styles.detailRow}>
+              <span className={styles.detailLabel}>Email</span>
+              <span className={styles.detailValue}>
+                {email || "—"}
                 <button
                   className={styles.copyButton}
                   type="button"
@@ -142,9 +142,9 @@ export default function MaintainerCard({
                     />
                   </svg>
                 </button>
-              ) : null}
-            </span>
-          </div>
+              </span>
+            </div>
+          ) : null}
           <div className={styles.detailRow}>
             <span className={styles.detailLabel}>GitHub</span>
             <span className={styles.detailValue}>

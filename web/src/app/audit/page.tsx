@@ -111,6 +111,18 @@ export default function AuditPage() {
     return <span>—</span>;
   };
 
+  const formatMetadata = (value?: string | null) => {
+    if (!value) {
+      return "";
+    }
+    try {
+      const parsed = JSON.parse(value);
+      return JSON.stringify(parsed, null, 2);
+    } catch {
+      return value;
+    }
+  };
+
   return (
     <AppShell>
       <div className={styles.page}>
@@ -232,7 +244,9 @@ export default function AuditPage() {
                 <span className={styles.modalLabel}>Metadata</span>
                 <span className={styles.modalValue}>
                   {selectedLog.metadata ? (
-                    <div className={styles.metadataBox}>{selectedLog.metadata}</div>
+                    <pre className={styles.metadataBox}>
+                      {formatMetadata(selectedLog.metadata)}
+                    </pre>
                   ) : (
                     "—"
                   )}

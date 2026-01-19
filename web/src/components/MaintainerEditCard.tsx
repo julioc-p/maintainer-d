@@ -22,6 +22,8 @@ type MaintainerEditCardProps = {
   isDirty: boolean;
   saveStatus: "idle" | "saving";
   saveError: string | null;
+  disableGitHub?: boolean;
+  disableStatus?: boolean;
   disableCompanyAdd?: boolean;
   onEdit: () => void;
   onCancel: () => void;
@@ -37,6 +39,8 @@ export default function MaintainerEditCard({
   isDirty,
   saveStatus,
   saveError,
+  disableGitHub = false,
+  disableStatus = false,
   disableCompanyAdd = false,
   onEdit,
   onCancel,
@@ -85,7 +89,7 @@ export default function MaintainerEditCard({
               onChange={(event) =>
                 onChange({ ...draft, github: event.target.value })
               }
-              disabled={!isEditing}
+              disabled={!isEditing || disableGitHub}
             />
           </label>
           <label
@@ -98,7 +102,7 @@ export default function MaintainerEditCard({
               onChange={(event) =>
                 onChange({ ...draft, status: event.target.value })
               }
-              disabled={!isEditing}
+              disabled={!isEditing || disableStatus}
             >
               <option value="Active">Active</option>
               <option value="Emeritus">Emeritus</option>
