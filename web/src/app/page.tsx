@@ -6,7 +6,7 @@ import { Pagination } from "clo-ui/components/Pagination";
 import { SortOptions } from "clo-ui/components/SortOptions";
 import AppShell from "@/components/AppShell";
 import ProjectCard from "@/components/ProjectCard";
-import { useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import styles from "./page.module.css";
 
 type Project = {
@@ -29,7 +29,7 @@ export default function Home() {
   const [sortBy, setSortBy] = useState("name");
   const [sortDirection, setSortDirection] = useState("asc");
   const [activeMaturity, setActiveMaturity] = useState<string[]>([]);
-  const searchParams = useSearchParams();
+  const pathname = usePathname();
 
   const bffBaseUrl = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_BFF_BASE_URL || "/api";
@@ -46,9 +46,22 @@ export default function Home() {
   }, [bffBaseUrl]);
 
   useEffect(() => {
-    const nextQuery = searchParams.get("query") || "";
-    setQuery((current) => (current === nextQuery ? current : nextQuery));
-  }, [searchParams]);
+    if (typeof window === "undefined") {
+      return;
+    }
+    const syncQuery = () => {
+      const params = new URLSearchParams(window.location.search);
+      const nextQuery = params.get("query") || "";
+      setQuery((current) => (current === nextQuery ? current : nextQuery));
+    };
+    syncQuery();
+    window.addEventListener("popstate", syncQuery);
+    window.addEventListener("md-search", syncQuery);
+    return () => {
+      window.removeEventListener("popstate", syncQuery);
+      window.removeEventListener("md-search", syncQuery);
+    };
+  }, [pathname]);
 
   useEffect(() => {
     setPage(1);

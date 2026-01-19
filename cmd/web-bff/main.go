@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -325,8 +326,13 @@ func (s *server) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	login := strings.ToLower(ghUser.GetLogin())
 	role, authorized := s.authorizeLogin(login)
+	attemptRole := role
 	if !authorized {
-		s.logger.Printf("web-bff: unauthorized login attempt from github user %q", login)
+		attemptRole = "unauthorized"
+	}
+	s.logger.Printf("web-bff: login attempt user=%s role=%s ip=%s", login, attemptRole, clientIP(r))
+	if !authorized {
+		s.logger.Printf("web-bff: unauthorized login attempt from github user %q ip=%s", login, clientIP(r))
 		http.Error(w, "unauthorized", http.StatusForbidden)
 		return
 	}
@@ -358,6 +364,11 @@ func (s *server) handleTestLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	role, authorized := s.authorizeLogin(login)
+	attemptRole := role
+	if !authorized {
+		attemptRole = "unauthorized"
+	}
+	s.logger.Printf("web-bff: login attempt user=%s role=%s ip=%s", login, attemptRole, clientIP(r))
 	if !authorized {
 		http.Error(w, "unauthorized", http.StatusForbidden)
 		return
@@ -438,9 +449,14 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := map[string]string{
+	response := map[string]any{
 		"login": session.Login,
 		"role":  session.Role,
+	}
+	if session.Role == roleMaintainer {
+		if maintainer, err := s.getMaintainerByLogin(session.Login); err == nil {
+			response["maintainerId"] = maintainer.ID
+		}
 	}
 	w.Header().Set(headerContentType, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -514,6 +530,27 @@ type projectDetailResponse struct {
 }
 
 func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
+	session := sessionFromContext(r.Context())
+	if session == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var maintainerID uint
+	if session.Role == roleMaintainer {
+		maintainer, err := s.getMaintainerByLogin(session.Login)
+		if err != nil {
+			s.logger.Printf("web-bff: access denied projects user=%s role=%s reason=maintainer_lookup_failed err=%v", session.Login, session.Role, err)
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		maintainerID = maintainer.ID
+		s.logger.Printf("web-bff: projects visible to maintainer user=%s id=%d", session.Login, maintainerID)
+	} else if session.Role != roleStaff {
+		s.logger.Printf("web-bff: access denied projects user=%s role=%s reason=role_not_allowed", session.Login, session.Role)
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
 	query := strings.TrimSpace(r.URL.Query().Get("query"))
 	limit := parseIntParam(r, "limit", 20, 1, 100)
 	offset := parseIntParam(r, "offset", 0, 0, 10_000_000)
@@ -554,6 +591,9 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 		s.logger.Printf("web-bff: handleProjects count error: %v", err)
 		http.Error(w, "failed to count projects", http.StatusInternalServerError)
 		return
+	}
+	if session.Role == roleMaintainer && total == 0 {
+		s.logger.Printf("web-bff: projects empty for maintainer user=%s id=%d query=%q maturity=%v", session.Login, maintainerID, query, maturityFilters)
 	}
 
 	order := "projects." + sortBy + " " + direction
@@ -630,12 +670,12 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session := sessionFromContext(r.Context())
-	login := "anonymous"
-	role := "unknown"
-	if session != nil {
-		login = session.Login
-		role = session.Role
+	if session == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
 	}
+	login := session.Login
+	role := session.Role
 	s.logger.Printf("web-bff: project lookup id=%d path=%s user=%s role=%s", id, r.URL.Path, login, role)
 
 	project, err := s.store.GetProjectByID(id)
@@ -647,6 +687,17 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 		}
 		s.logger.Printf("web-bff: failed to load project id=%d path=%s user=%s role=%s err=%v", id, r.URL.Path, login, role, err)
 		http.Error(w, "failed to load project", http.StatusInternalServerError)
+		return
+	}
+	if session.Role == roleMaintainer {
+		if _, err := s.getMaintainerByLogin(session.Login); err != nil {
+			s.logger.Printf("web-bff: maintainer access denied project=%d user=%s role=%s reason=%v", id, session.Login, session.Role, err)
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+	} else if session.Role != roleStaff {
+		s.logger.Printf("web-bff: access denied project=%d user=%s role=%s reason=role_not_allowed", id, session.Login, session.Role)
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -671,7 +722,7 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 			refLines = buildMaintainerRefLines(body)
 		}
 	}
-	if role != roleStaff {
+	if role != roleStaff && role != roleMaintainer {
 		refBody = ""
 		refLines = nil
 	}
@@ -997,13 +1048,27 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session := sessionFromContext(r.Context())
-	login := "anonymous"
-	role := "unknown"
-	if session != nil {
-		login = session.Login
-		role = session.Role
+	if session == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
 	}
+	login := session.Login
+	role := session.Role
 	s.logger.Printf("web-bff: maintainer lookup id=%d path=%s user=%s role=%s", id, r.URL.Path, login, role)
+	var requester *model.Maintainer
+	if session.Role == roleMaintainer {
+		maintainer, err := s.getMaintainerByLogin(session.Login)
+		if err != nil {
+			s.logger.Printf("web-bff: maintainer access denied target=%d user=%s role=%s reason=%v", id, session.Login, session.Role, err)
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		requester = maintainer
+	} else if session.Role != roleStaff {
+		s.logger.Printf("web-bff: access denied target=%d user=%s role=%s reason=role_not_allowed", id, session.Login, session.Role)
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 
 	switch r.Method {
 	case http.MethodGet:
@@ -1061,12 +1126,25 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 		}
 
 		w.Header().Set(headerContentType, contentTypeJSON)
+		isSelf := requester != nil && requester.ID == id
+		if session.Role != roleStaff && !isSelf {
+			response.Email = ""
+			response.GitHubEmail = ""
+		}
 		if err := json.NewEncoder(w).Encode(response); err != nil {
 			s.logger.Printf("web-bff: handleMaintainer encode error: %v", err)
 		}
 		return
 	case http.MethodPatch, http.MethodPut:
-		if session == nil || session.Role != roleStaff {
+		maintainerEditSelf := false
+		if session.Role == roleMaintainer {
+			requester, err := s.getMaintainerByLogin(session.Login)
+			if err != nil || requester.ID != id {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			maintainerEditSelf = true
+		} else if session.Role != roleStaff {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -1086,6 +1164,10 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		status := model.MaintainerStatus(strings.TrimSpace(req.Status))
+		if maintainerEditSelf {
+			status = before.MaintainerStatus
+			req.GitHub = before.GitHubAccount
+		}
 		if !status.IsValid() {
 			http.Error(w, "invalid status", http.StatusBadRequest)
 			return
@@ -1422,8 +1504,8 @@ type companyDuplicateGroup struct {
 
 func (s *server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 	session := sessionFromContext(r.Context())
-	if session == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	if session == nil || (session.Role != roleStaff && session.Role != roleMaintainer) {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -1482,7 +1564,7 @@ func (s *server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 			s.logger.Printf("web-bff: handleCompanies encode error: %v", err)
 		}
 	case http.MethodPost:
-		if session.Role != roleStaff {
+		if session.Role != roleStaff && session.Role != roleMaintainer {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -1499,6 +1581,52 @@ func (s *server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 			}
 			http.Error(w, "failed to create company", http.StatusBadRequest)
 			return
+		}
+		var staffID *uint
+		var maintainerID *uint
+		actorName := session.Login
+		if session.Role == roleStaff && session.Login != "" {
+			var staff model.StaffMember
+			if err := s.store.DB().
+				Where("LOWER(git_hub_account) = ?", strings.ToLower(session.Login)).
+				First(&staff).Error; err == nil {
+				staffID = &staff.ID
+				if staff.Name != "" {
+					actorName = staff.Name
+				}
+			}
+		}
+		if session.Role == roleMaintainer && session.Login != "" {
+			if maintainer, err := s.getMaintainerByLogin(session.Login); err == nil {
+				maintainerID = &maintainer.ID
+				if strings.TrimSpace(maintainer.Name) != "" {
+					actorName = maintainer.Name
+				}
+			}
+		}
+		metadata := map[string]any{
+			"actor": map[string]string{
+				"login": session.Login,
+				"role":  session.Role,
+			},
+			"company": map[string]any{
+				"id":   company.ID,
+				"name": company.Name,
+			},
+		}
+		if metadataJSON, err := json.Marshal(metadata); err != nil {
+			s.logger.Printf("web-bff: create company audit metadata encode error: %v", err)
+		} else {
+			event := model.AuditLog{
+				StaffID:      staffID,
+				MaintainerID: maintainerID,
+				Action:       "COMPANY_CREATE",
+				Message:      fmt.Sprintf("Company created by %s", actorName),
+				Metadata:     string(metadataJSON),
+			}
+			if err := s.store.DB().Create(&event).Error; err != nil {
+				s.logger.Printf("web-bff: create company audit log failed: %v", err)
+			}
 		}
 		w.Header().Set(headerContentType, contentTypeJSON)
 		if err := json.NewEncoder(w).Encode(companyResponse{ID: company.ID, Name: company.Name}); err != nil {
@@ -1603,6 +1731,26 @@ func (s *server) requireSession(next http.Handler) http.Handler {
 	})
 }
 
+func clientIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		parts := strings.Split(forwarded, ",")
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
+		return realIP
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
 func (s *server) authorizeLogin(login string) (string, bool) {
 	if login == "" {
 		return "", false
@@ -1634,6 +1782,22 @@ func (s *server) authorizeLogin(login string) (string, bool) {
 	}
 
 	return "", false
+}
+
+func (s *server) getMaintainerByLogin(login string) (*model.Maintainer, error) {
+	if strings.TrimSpace(login) == "" {
+		return nil, fmt.Errorf("missing login")
+	}
+	var maintainer model.Maintainer
+	if err := s.store.DB().
+		Where("LOWER(git_hub_account) = ?", strings.ToLower(login)).
+		First(&maintainer).Error; err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(maintainer.GitHubAccount) == "" || maintainer.GitHubAccount == "GITHUB_MISSING" {
+		return nil, fmt.Errorf("maintainer has no github account")
+	}
+	return &maintainer, nil
 }
 
 func fetchGitHubUser(ctx context.Context, token *oauth2.Token) (*github.User, error) {

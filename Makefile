@@ -403,14 +403,14 @@ test-web:
 	TESTDATA_DIR="$${TESTDATA_DIR:-$$(pwd)/testdata}"; \
 	HOST_LOG_DIR="$${HOST_LOG_DIR:-$$(pwd)/testdata}"; \
 	mkdir -p "$$TESTDATA_DIR"; \
-		bff_pid=""; web_pid=""; \
+	bff_pid=""; web_pid=""; \
 	cleanup() { \
 		status=$$?; \
 		if [ -n "$$web_pid" ] || [ -n "$$bff_pid" ]; then \
 			kill $$web_pid $$bff_pid >/dev/null 2>&1 || true; \
 		fi; \
 		if command -v lsof >/dev/null 2>&1; then \
-			lsof -ti TCP:8001 -ti TCP:3001 2>/dev/null | xargs -r kill >/dev/null 2>&1 || true; \
+			lsof -ti TCP:9001 -ti TCP:4001 2>/dev/null | xargs -r kill >/dev/null 2>&1 || true; \
 		fi; \
 		if [ "$$TESTDATA_DIR" != "$$HOST_LOG_DIR" ]; then \
 			mkdir -p "$$HOST_LOG_DIR"; \
@@ -420,19 +420,29 @@ test-web:
 			cp -f "$$TESTDATA_DIR"/web-bdd-results.xml "$$HOST_LOG_DIR" 2>/dev/null || true; \
 		fi; \
 		if [ $$status -ne 0 ]; then \
-			echo "test-web failed; dumping logs from $$TESTDATA_DIR"; \
-			[ -f "$$TESTDATA_DIR/web-bff-test.log" ] && echo "--- web-bff-test.log ---" && cat "$$TESTDATA_DIR/web-bff-test.log" || true; \
-			[ -f "$$TESTDATA_DIR/web-app-test.log" ] && echo "--- web-app-test.log ---" && cat "$$TESTDATA_DIR/web-app-test.log" || true; \
-			[ -f "$$TESTDATA_DIR/web-build-test.log" ] && echo "--- web-build-test.log ---" && cat "$$TESTDATA_DIR/web-build-test.log" || true; \
+			echo "test-web failed; grepping logs from $$TESTDATA_DIR"; \
+			if [ -f "$$TESTDATA_DIR/web-bff-test.log" ]; then \
+				echo "--- web-bff-test.log (errors) ---"; \
+				{ rg -n "(error|failed|panic)" "$$TESTDATA_DIR/web-bff-test.log" || true; } ; \
+			fi; \
+			if [ -f "$$TESTDATA_DIR/web-app-test.log" ]; then \
+				echo "--- web-app-test.log (errors) ---"; \
+				{ rg -n "(error|failed|panic)" "$$TESTDATA_DIR/web-app-test.log" || true; } ; \
+			fi; \
+			if [ -f "$$TESTDATA_DIR/web-build-test.log" ]; then \
+				echo "--- web-build-test.log (errors) ---"; \
+				{ rg -n "(error|failed|panic)" "$$TESTDATA_DIR/web-build-test.log" || true; } ; \
+			fi; \
 		fi; \
 		exit $$status; \
 	}; \
 	trap cleanup EXIT; \
 	if command -v lsof >/dev/null 2>&1; then \
-		pids="$$(lsof -ti TCP:8001 -ti TCP:3001 2>/dev/null || true)"; \
+		pids="$$(lsof -ti TCP:9001 -ti TCP:4001 2>/dev/null || true)"; \
 		if [ -n "$$pids" ]; then \
-			echo "Ports 8001/3001 are in use (PIDs: $$pids). Stop them and retry."; \
-			exit 1; \
+			echo "Ports 9001/4001 are in use (PIDs: $$pids). Stopping them..."; \
+			kill $$pids 2>/dev/null || true; \
+			sleep 1; \
 		fi; \
 	fi; \
 	rm -f "$$TESTDATA_DIR/maintainerd_test.db" || true; \
@@ -441,22 +451,23 @@ test-web:
 		exit 1; \
 	fi; \
 	go run ./cmd/web-bff-seed -db "$$TESTDATA_DIR/maintainerd_test.db"; \
-	BFF_ADDR=:8001 BFF_TEST_MODE=true SESSION_COOKIE_SECURE=false SESSION_COOKIE_DOMAIN= \
+	BFF_ADDR=:9001 BFF_TEST_MODE=true SESSION_COOKIE_SECURE=false SESSION_COOKIE_DOMAIN= \
 	MD_DB_DRIVER=sqlite MD_DB_DSN= MD_DB_PATH="$$TESTDATA_DIR/maintainerd_test.db" \
-	WEB_APP_BASE_URL=http://localhost:3001 GITHUB_OAUTH_REDIRECT_URL=http://localhost:8001/auth/callback \
+	WEB_APP_BASE_URL=http://localhost:4001 GITHUB_OAUTH_REDIRECT_URL=http://localhost:9001/auth/callback \
 	GITHUB_OAUTH_CLIENT_ID=test GITHUB_OAUTH_CLIENT_SECRET=test \
 	go run ./cmd/web-bff > >(tee "$$TESTDATA_DIR/web-bff-test.log") 2>&1 & \
 	bff_pid=$$!; \
 	mkdir -p "$$TESTDATA_DIR/tmp" web/tmp || true; \
-	NEXT_PUBLIC_BFF_BASE_URL=http://localhost:8001 NEXT_DIST_DIR="$$TESTDATA_DIR/next-dist" TMPDIR="$$TESTDATA_DIR/tmp" NEXT_TEMP_DIR="$$TESTDATA_DIR/tmp" \
+	NEXT_PUBLIC_BFF_BASE_URL=http://localhost:9001 NEXT_DIST_DIR="$$TESTDATA_DIR/next-dist" TMPDIR="$$TESTDATA_DIR/tmp" NEXT_TEMP_DIR="$$TESTDATA_DIR/tmp" \
 	NEXT_TELEMETRY_DISABLED=1 NPM_CONFIG_UPDATE_NOTIFIER=false TURBOPACK_ROOT="$$(pwd)/web" OUTPUT_FILE_TRACING_ROOT="$$(pwd)/web" \
 	npm --prefix web run build > "$$TESTDATA_DIR/web-build-test.log" 2>&1; \
-	PORT=3001 NEXT_PUBLIC_BFF_BASE_URL=http://localhost:8001 NEXT_DIST_DIR="$$TESTDATA_DIR/next-dist" TMPDIR="$$TESTDATA_DIR/tmp" NEXT_TEMP_DIR="$$TESTDATA_DIR/tmp" \
+	PORT=4001 NEXT_PUBLIC_BFF_BASE_URL=http://localhost:9001 NEXT_DIST_DIR="$$TESTDATA_DIR/next-dist" TMPDIR="$$TESTDATA_DIR/tmp" NEXT_TEMP_DIR="$$TESTDATA_DIR/tmp" \
 	NEXT_TELEMETRY_DISABLED=1 NPM_CONFIG_UPDATE_NOTIFIER=false TURBOPACK_ROOT="$$(pwd)/web" OUTPUT_FILE_TRACING_ROOT="$$(pwd)/web" \
 	npm --prefix web run start > "$$TESTDATA_DIR/web-app-test.log" 2>&1 & \
 	web_pid=$$!; \
-	npx --prefix web wait-on http://localhost:8001/healthz http://localhost:3001 > /dev/null 2>&1; \
-	WEB_BASE_URL=http://localhost:3001 BFF_BASE_URL=http://localhost:8001 TEST_STAFF_LOGIN=staff-tester \
+	npx --prefix web wait-on http://localhost:9001/healthz http://localhost:4001 > /dev/null 2>&1; \
+	WEB_BASE_URL=http://localhost:4001 BFF_BASE_URL=http://localhost:9001 TEST_STAFF_LOGIN=staff-tester \
+	TEST_MAINTAINER_LOGIN=antonio-example TEST_OTHER_MAINTAINER_LOGIN=renee-sample \
 	NEXT_TELEMETRY_DISABLED=1 NPM_CONFIG_UPDATE_NOTIFIER=false WEB_TEST_ARTIFACTS_DIR="$$TESTDATA_DIR/web-artifacts" npm --prefix web run test:bdd; \
 	'
 
@@ -917,6 +928,8 @@ ci-local:
 	@npm --prefix web run lint -- --max-warnings=$(ESLINT_MAX_WARNINGS)
 	@echo "→ Running web typecheck..."
 	@npm --prefix web run typecheck
+	@echo "→ Running web BDD..."
+	@$(MAKE) web-bdd
 	@echo "→ Running tests with race detector..."
 	@go test -race -coverprofile=coverage.out -covermode=atomic ./...
 	@echo "→ Coverage report:"

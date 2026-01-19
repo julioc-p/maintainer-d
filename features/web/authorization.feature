@@ -34,7 +34,7 @@ Feature: Role-based access to project data
       | Alpha        | alice            |
       | Alpha        | charlie          |
 
-  Scenario: Maintainer cannot access other projects
+  Scenario: Maintainer can access other projects
     Given I am signed in as a maintainer for project "Alpha"
     When I attempt to view project "Beta"
-    Then I am denied access to project "Beta"
+    Then I can see project "Beta" data

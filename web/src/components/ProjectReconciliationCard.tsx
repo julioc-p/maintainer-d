@@ -226,13 +226,6 @@ export default function ProjectReconciliationCard({
           ) : null}
           <ul className={styles.list}>
             {group.items.map((maintainer) => {
-              const status = (maintainer.status || "").toLowerCase();
-              let statusClass = styles.statusMuted;
-              if (status === "active") statusClass = styles.statusOk;
-              else if (status === "emeritus") statusClass = styles.statusEmeritus;
-              else if (status === "retired") statusClass = styles.statusRetired;
-              else if (status === "archived") statusClass = styles.statusArchived;
-
               const checked = selectedMaintainers.has(maintainer.id);
 
               return (

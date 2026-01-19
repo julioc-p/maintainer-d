@@ -6,7 +6,7 @@ import { Footer } from "clo-ui/components/Footer";
 import { Navbar } from "clo-ui/components/Navbar";
 import { Searchbar } from "clo-ui/components/Searchbar";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "./ThemeProvider";
 import styles from "./AppShell.module.css";
 
@@ -19,6 +19,7 @@ type AppShellProps = {
 type MeResponse = {
   login: string;
   role: string;
+  maintainerId?: number;
 };
 
 const MoonIcon = () => (
@@ -58,15 +59,17 @@ export default function AppShell({
   const devLoginAttemptedRef = useRef(false);
   const [mounted, setMounted] = useState(false);
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const [navQuery, setNavQuery] = useState(
-    () => searchParams.get("query") || ""
-  );
+  const pathname = usePathname();
+  const [navQuery, setNavQuery] = useState("");
 
   useEffect(() => {
-    const nextQuery = searchParams.get("query") || "";
+    if (typeof window === "undefined") {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const nextQuery = params.get("query") || "";
     setNavQuery((current) => (current === nextQuery ? current : nextQuery));
-  }, [searchParams]);
+  }, [pathname]);
 
   const bffBaseUrl = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_BFF_BASE_URL || "/api";
@@ -177,6 +180,9 @@ export default function AppShell({
           }
           const qs = params.toString();
           router.push(qs ? `/?${qs}` : "/");
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new Event("md-search"));
+          }
         }}
         cleanSearchValue={() => setNavQuery("")}
         bigSize={false}
@@ -228,7 +234,11 @@ export default function AppShell({
                 btnClassName={styles.dropdownButton}
                 dropdownClassName={styles.dropdownMenu}
               >
-                <UserMenu onLogout={handleLogout} />
+                <UserMenu
+                  onLogout={handleLogout}
+                  role={me.role}
+                  maintainerId={me.maintainerId}
+                />
               </Dropdown>
             ) : (
               <Link
@@ -294,11 +304,13 @@ export default function AppShell({
 
 type UserMenuProps = {
   onLogout: () => void;
+  role: string;
+  maintainerId?: number;
   closeDropdown?: () => void;
   isVisibleDropdown?: boolean;
 };
 
-function UserMenu({ onLogout, closeDropdown }: UserMenuProps) {
+function UserMenu({ onLogout, closeDropdown, role, maintainerId }: UserMenuProps) {
   const handleClick = () => {
     onLogout();
     closeDropdown?.();
@@ -306,6 +318,15 @@ function UserMenu({ onLogout, closeDropdown }: UserMenuProps) {
 
   return (
     <div className={styles.dropdownContent}>
+      {role === "maintainer" && maintainerId ? (
+        <Link
+          className={styles.dropdownItem}
+          href={`/maintainers/${maintainerId}`}
+          onClick={() => closeDropdown?.()}
+        >
+          Manage my details
+        </Link>
+      ) : null}
       <button className={styles.dropdownItem} onClick={handleClick} type="button">
         Sign out
       </button>

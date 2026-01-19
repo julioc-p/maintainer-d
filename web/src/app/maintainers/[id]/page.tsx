@@ -69,6 +69,8 @@ export default function MaintainerPage() {
   const [status, setStatus] = useState<"idle" | "loading" | "ready">("idle");
   const [error, setError] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
+  const [selfMaintainerId, setSelfMaintainerId] = useState<number | null>(null);
+  const [selfLogin, setSelfLogin] = useState<string | null>(null);
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [editDraft, setEditDraft] = useState<MaintainerEditDraft | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -83,6 +85,7 @@ export default function MaintainerPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const maintainerId = params?.id;
+  const maintainerIdNumber = maintainerId ? Number(maintainerId) : null;
   const pollIntervalMs = 5000;
 
   const bffBaseUrl = useMemo(() => {
@@ -100,6 +103,16 @@ export default function MaintainerPage() {
   }, [bffBaseUrl]);
 
   const canEdit = role === "staff";
+  const canEditSelf =
+    role === "maintainer" &&
+    ((selfMaintainerId !== null &&
+      maintainerIdNumber !== null &&
+      selfMaintainerId === maintainerIdNumber) ||
+      (!!selfLogin &&
+        !!maintainer?.github &&
+        selfLogin.toLowerCase() === maintainer.github.toLowerCase()));
+  const canEditRecord = canEdit || canEditSelf;
+  const disableNonStaffFields = role === "maintainer";
 
   useEffect(() => {
     let alive = true;
@@ -163,9 +176,17 @@ export default function MaintainerPage() {
         if (!response.ok) {
           return;
         }
-        const data = (await response.json()) as { role?: string };
+        const data = (await response.json()) as {
+          role?: string;
+          maintainerId?: number;
+          login?: string;
+        };
         if (alive) {
           setRole(data.role || null);
+          setSelfMaintainerId(
+            typeof data.maintainerId === "number" ? data.maintainerId : null
+          );
+          setSelfLogin(data.login || null);
         }
       } catch {
         // Ignore.
@@ -179,7 +200,7 @@ export default function MaintainerPage() {
 
   useEffect(() => {
     let alive = true;
-    if (!canEdit) {
+    if (!canEditRecord) {
       return () => {
         alive = false;
       };
@@ -204,7 +225,7 @@ export default function MaintainerPage() {
     return () => {
       alive = false;
     };
-  }, [apiBaseUrl, canEdit]);
+  }, [apiBaseUrl, canEditRecord]);
 
   useEffect(() => {
     if (!maintainer || isEditing) {
@@ -348,7 +369,7 @@ export default function MaintainerPage() {
         <div className={styles.container}>
           {status === "loading" && <div className={styles.banner}>Loading…</div>}
           {error && <div className={styles.banner}>{error}</div>}
-          {canEdit && maintainer && editDraft && (
+          {canEditRecord && maintainer && editDraft && (
             <MaintainerEditCard
               draft={editDraft}
               companies={companies}
@@ -356,6 +377,8 @@ export default function MaintainerPage() {
               isDirty={isDirty}
               saveStatus={saveStatus}
               saveError={saveError}
+              disableGitHub={disableNonStaffFields}
+              disableStatus={disableNonStaffFields}
               disableCompanyAdd={companySaveStatus === "saving"}
               onEdit={() => {
                 setIsEditing(true);
@@ -381,7 +404,7 @@ export default function MaintainerPage() {
               }}
             />
           )}
-          {canEdit && isCompanyModalOpen && (
+          {canEditRecord && isCompanyModalOpen && (
             <CompanyCreateModal
               name={companyDraftName}
               error={companySaveError}

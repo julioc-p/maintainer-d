@@ -10,15 +10,19 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 let browser;
+let keepOpen = false;
+let keepOpenOnFailure = false;
 
 setDefaultTimeout(20 * 1000);
 
 BeforeAll(async () => {
-  browser = await chromium.launch({ headless: true });
+  const headless = process.env.WEB_TEST_HEADLESS !== "false";
+  keepOpen = process.env.WEB_TEST_KEEP_OPEN === "true";
+  browser = await chromium.launch({ headless });
 });
 
 AfterAll(async () => {
-  if (browser) {
+  if (browser && !keepOpenOnFailure) {
     await browser.close();
   }
 });
@@ -35,12 +39,17 @@ Before(async function () {
 });
 
 After(async function (scenario) {
-  if (scenario?.result?.status === "FAILED") {
+  const failed = scenario?.result?.status === "FAILED";
+  if (failed) {
     const safeName = scenario.pickle.name.replace(/[^a-z0-9-_]+/gi, "_").slice(0, 80);
     await this.page.screenshot({
       path: path.join(this.artifactsDir, `${safeName}.png`),
       fullPage: true,
     });
+  }
+  if (failed && keepOpen) {
+    keepOpenOnFailure = true;
+    return;
   }
   if (this.page) {
     await this.page.close();

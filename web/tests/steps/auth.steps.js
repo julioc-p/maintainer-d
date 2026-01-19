@@ -7,6 +7,7 @@ Given("I am signed in as staff", async function () {
     { waitUntil: "domcontentloaded" }
   );
   await this.page.goto(this.baseUrl);
+  this.currentRole = "staff";
 });
 
 When("the user signs in with GitHub OIDC using that account", async function () {
