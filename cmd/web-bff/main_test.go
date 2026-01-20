@@ -46,11 +46,31 @@ func setupPostgresTestDB(t *testing.T) *gorm.DB {
 	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
 
-	gormDB, err := db.OpenGorm("postgres", dsn, &gorm.Config{
-		Logger:                                   logger.Default.LogMode(logger.Silent),
-		DisableForeignKeyConstraintWhenMigrating: true,
-	})
-	require.NoError(t, err)
+	var gormDB *gorm.DB
+	var lastErr error
+	for attempt := 0; attempt < 10; attempt++ {
+		gormDB, lastErr = db.OpenGorm("postgres", dsn, &gorm.Config{
+			Logger:                                   logger.Default.LogMode(logger.Silent),
+			DisableForeignKeyConstraintWhenMigrating: true,
+		})
+		if lastErr != nil {
+			time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
+			continue
+		}
+		sqlDB, err := gormDB.DB()
+		if err == nil {
+			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			err = sqlDB.PingContext(pingCtx)
+			cancel()
+		}
+		if err == nil {
+			lastErr = nil
+			break
+		}
+		lastErr = err
+		time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
+	}
+	require.NoError(t, lastErr)
 
 	err = gormDB.AutoMigrate(
 		&model.Company{},
