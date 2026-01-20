@@ -4,6 +4,7 @@ import { Card } from "clo-ui/components/Card";
 import styles from "./MaintainerEditCard.module.css";
 
 export type MaintainerEditDraft = {
+  name: string;
   email: string;
   github: string;
   status: string;
@@ -22,6 +23,7 @@ type MaintainerEditCardProps = {
   isDirty: boolean;
   saveStatus: "idle" | "saving";
   saveError: string | null;
+  disableName?: boolean;
   disableGitHub?: boolean;
   disableStatus?: boolean;
   disableCompanyAdd?: boolean;
@@ -39,6 +41,7 @@ export default function MaintainerEditCard({
   isDirty,
   saveStatus,
   saveError,
+  disableName = false,
   disableGitHub = false,
   disableStatus = false,
   disableCompanyAdd = false,
@@ -64,6 +67,20 @@ export default function MaintainerEditCard({
           )}
         </div>
         <div className={styles.grid}>
+          <label
+            className={styles.field}
+            title={!isEditing ? "Click Edit to update this record." : undefined}
+          >
+            <span>Name</span>
+            <input
+              type="text"
+              value={draft.name}
+              onChange={(event) =>
+                onChange({ ...draft, name: event.target.value })
+              }
+              disabled={!isEditing || disableName}
+            />
+          </label>
           <label
             className={styles.field}
             title={!isEditing ? "Click Edit to update this record." : undefined}

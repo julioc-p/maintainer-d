@@ -261,7 +261,7 @@ func (s *SQLStore) UpdateMaintainersStatus(ids []uint, status model.MaintainerSt
 }
 
 // UpdateMaintainerDetails updates a maintainer's editable fields and returns the updated record.
-func (s *SQLStore) UpdateMaintainerDetails(maintainerID uint, email, github string, status model.MaintainerStatus, companyID *uint) (*model.Maintainer, error) {
+func (s *SQLStore) UpdateMaintainerDetails(maintainerID uint, name, email, github string, status model.MaintainerStatus, companyID *uint) (*model.Maintainer, error) {
 	if !status.IsValid() {
 		return nil, fmt.Errorf("invalid maintainer status %q", status)
 	}
@@ -274,6 +274,7 @@ func (s *SQLStore) UpdateMaintainerDetails(maintainerID uint, email, github stri
 	}
 
 	updates := map[string]interface{}{
+		"name":              strings.TrimSpace(name),
 		"email":             normalizeOrSentinel(email, "EMAIL_MISSING"),
 		"git_hub_account":   normalizeOrSentinel(github, "GITHUB_MISSING"),
 		"maintainer_status": status,

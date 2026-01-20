@@ -232,6 +232,7 @@ export default function MaintainerPage() {
       return;
     }
     setEditDraft({
+      name: maintainer.name || "",
       email: maintainer.email || "",
       github: maintainer.github || "",
       status: maintainer.status || "Active",
@@ -242,7 +243,8 @@ export default function MaintainerPage() {
   const isDirty =
     !!maintainer &&
     !!editDraft &&
-    (maintainer.email !== editDraft.email ||
+    (maintainer.name !== editDraft.name ||
+      maintainer.email !== editDraft.email ||
       maintainer.github !== editDraft.github ||
       maintainer.status !== editDraft.status ||
       (maintainer.companyId ?? null) !== editDraft.companyId);
@@ -267,6 +269,7 @@ export default function MaintainerPage() {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
+          name: editDraft.name,
           email: editDraft.email,
           github: editDraft.github,
           status: editDraft.status,
@@ -377,6 +380,7 @@ export default function MaintainerPage() {
               isDirty={isDirty}
               saveStatus={saveStatus}
               saveError={saveError}
+              disableName={disableNonStaffFields}
               disableGitHub={disableNonStaffFields}
               disableStatus={disableNonStaffFields}
               disableCompanyAdd={companySaveStatus === "saving"}
@@ -388,6 +392,7 @@ export default function MaintainerPage() {
                 setIsEditing(false);
                 setSaveError(null);
                 setEditDraft({
+                  name: maintainer.name || "",
                   email: maintainer.email || "",
                   github: maintainer.github || "",
                   status: maintainer.status || "Active",

@@ -20,6 +20,7 @@ body {
   --md-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
   --md-modal-backdrop: rgba(15, 23, 42, 0.45);
   --md-modal-shadow: 0 20px 40px rgba(15, 23, 42, 0.2);
+  --md-modal-z: 1100;
 }
 
 [data-theme="dark"] {

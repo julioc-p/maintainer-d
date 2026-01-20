@@ -1166,13 +1166,14 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 		status := model.MaintainerStatus(strings.TrimSpace(req.Status))
 		if maintainerEditSelf {
 			status = before.MaintainerStatus
+			req.Name = before.Name
 			req.GitHub = before.GitHubAccount
 		}
 		if !status.IsValid() {
 			http.Error(w, "invalid status", http.StatusBadRequest)
 			return
 		}
-		updated, err := s.store.UpdateMaintainerDetails(id, req.Email, req.GitHub, status, req.CompanyID)
+		updated, err := s.store.UpdateMaintainerDetails(id, req.Name, req.Email, req.GitHub, status, req.CompanyID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				http.Error(w, "maintainer not found", http.StatusNotFound)
@@ -1199,6 +1200,17 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 		}
 
 		changes := make(map[string]map[string]string)
+		beforeName := strings.TrimSpace(before.Name)
+		afterName := strings.TrimSpace(updated.Name)
+		if beforeName == "" {
+			beforeName = "NAME_MISSING"
+		}
+		if afterName == "" {
+			afterName = "NAME_MISSING"
+		}
+		if beforeName != afterName {
+			changes["name"] = map[string]string{"from": beforeName, "to": afterName}
+		}
 		beforeEmail := normalizeValue(before.Email, "EMAIL_MISSING")
 		afterEmail := normalizeValue(updated.Email, "EMAIL_MISSING")
 		if beforeEmail != afterEmail {
@@ -1224,7 +1236,21 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 			afterCompany = fmt.Sprintf("%d", *updated.CompanyID)
 		}
 		if beforeCompany != afterCompany {
-			changes["companyId"] = map[string]string{"from": beforeCompany, "to": afterCompany}
+			beforeCompanyName := ""
+			if before.CompanyID != nil {
+				var company model.Company
+				if err := s.store.DB().First(&company, *before.CompanyID).Error; err == nil {
+					beforeCompanyName = strings.TrimSpace(company.Name)
+				}
+			}
+			afterCompanyName := strings.TrimSpace(updated.Company.Name)
+			if beforeCompanyName == "" {
+				beforeCompanyName = "COMPANY_MISSING"
+			}
+			if afterCompanyName == "" {
+				afterCompanyName = "COMPANY_MISSING"
+			}
+			changes["company"] = map[string]string{"from": beforeCompanyName, "to": afterCompanyName}
 		}
 
 		metadata := map[string]any{
@@ -1234,6 +1260,15 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 			},
 			"changes": changes,
 		}
+		fieldNames := make([]string, 0, len(changes))
+		for field := range changes {
+			fieldNames = append(fieldNames, field)
+		}
+		sort.Strings(fieldNames)
+		message := fmt.Sprintf("Maintainer updated by %s", staffName)
+		if len(fieldNames) > 0 {
+			message = fmt.Sprintf("Maintainer [%s] updated by %s", strings.Join(fieldNames, ", "), staffName)
+		}
 		if metadataJSON, err := json.Marshal(metadata); err != nil {
 			s.logger.Printf("web-bff: update maintainer audit metadata encode error: %v", err)
 		} else {
@@ -1241,7 +1276,7 @@ func (s *server) handleMaintainer(w http.ResponseWriter, r *http.Request) {
 				MaintainerID: &id,
 				StaffID:      staffID,
 				Action:       "MAINTAINER_UPDATE",
-				Message:      fmt.Sprintf("Maintainer updated by %s", staffName),
+				Message:      message,
 				Metadata:     string(metadataJSON),
 			}
 			if err := s.store.DB().Create(&event).Error; err != nil {
@@ -1361,6 +1396,7 @@ func (s *server) handleAudit(w http.ResponseWriter, r *http.Request) {
 }
 
 type maintainerUpdateRequest struct {
+	Name      string `json:"name"`
 	Email     string `json:"email"`
 	GitHub    string `json:"github"`
 	Status    string `json:"status"`
