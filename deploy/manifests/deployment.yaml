@@ -35,3 +35,5 @@ spec:
                 name: maintainerd-bootstrap-env
             - secretRef:
                 name: maintainerd-db-env
+            - secretRef:
+                name: maintainerd-server-env

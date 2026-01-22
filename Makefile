@@ -343,13 +343,17 @@ help:
 	@echo "make apply-web-bff-env -> create/update $(WEB_BFF_ENV_SECRET_NAME) from $(WEB_BFF_ENV_TEMPLATE)"
 	@echo "make web-secrets     -> apply both web secrets from templates"
 	@echo "make sops-encrypt-web-secrets -> encrypt web/db secrets in deploy/secrets (uses SOPS_AGE_KEY)"
+	@echo "make sops-encrypt-server-secrets -> encrypt server secrets in deploy/secrets (uses SOPS_AGE_KEY)"
 	@echo "make sops-encrypt-bootstrap-secrets -> encrypt bootstrap secrets in deploy/secrets (uses SOPS_AGE_KEY)"
 	@echo "make sops-envsubst-encrypt -> envsubst templates into deploy/secrets then sops-encrypt (uses SOPS_AGE_KEY)"
+	@echo "make sops-envsubst-encrypt-server -> envsubst server template into deploy/secrets then sops-encrypt (uses SOPS_AGE_KEY)"
 	@echo "make sops-envsubst-encrypt-bootstrap -> envsubst bootstrap template into deploy/secrets then sops-encrypt (uses SOPS_AGE_KEY)"
 	@echo "make sops-edit-web-secrets -> edit encrypted web secrets with sops"
+	@echo "make sops-edit-server-secrets -> edit encrypted server secrets with sops"
 	@echo "make sops-edit-bootstrap-secrets -> edit encrypted bootstrap secrets with sops"
 	@echo "make sops-edit-web-bff-secrets -> edit only the web-bff secret with sops"
-	@echo "make sops-apply-web-secrets -> apply web secrets from SOPS (uses local sops; set SOPS_CMD or SOPS_AGE_KEY_FILE if needed)"
+	@echo "make sops-apply-web-secrets -> apply web/db/server secrets from SOPS (uses local sops; set SOPS_CMD or SOPS_AGE_KEY_FILE if needed)"
+	@echo "make sops-apply-server-secrets -> apply server secrets from SOPS (uses local sops; set SOPS_CMD or SOPS_AGE_KEY_FILE if needed)"
 	@echo "make sops-apply-bootstrap-secrets -> apply bootstrap secrets from SOPS"
 	@echo "make deploy-web -> apply web-bff/web services + deployments + ingress + cert"
 	@echo "make web-image-set TAG=... -> set maintainerd-web image to a specific tag"
@@ -573,12 +577,12 @@ web-secrets: apply-web-env apply-web-bff-env
 sops-apply-web-secrets:
 	@echo "Applying web secrets from SOPS [ns=$(NAMESPACE)]"
 	@bash -c 'set -euo pipefail; \
-	if [ ! -f "deploy/secrets/maintainerd-web-env.yaml" ] || [ ! -f "deploy/secrets/maintainerd-web-bff-env.yaml" ] || [ ! -f "deploy/secrets/maintainerd-db-env.yaml" ]; then \
-		echo "Missing encrypted secrets. Expected deploy/secrets/maintainerd-web-env.yaml, deploy/secrets/maintainerd-web-bff-env.yaml, and deploy/secrets/maintainerd-db-env.yaml."; \
+	if [ ! -f "deploy/secrets/maintainerd-web-env.yaml" ] || [ ! -f "deploy/secrets/maintainerd-web-bff-env.yaml" ] || [ ! -f "deploy/secrets/maintainerd-db-env.yaml" ] || [ ! -f "deploy/secrets/maintainerd-server-env.yaml" ]; then \
+		echo "Missing encrypted secrets. Expected deploy/secrets/maintainerd-web-env.yaml, deploy/secrets/maintainerd-web-bff-env.yaml, deploy/secrets/maintainerd-db-env.yaml, and deploy/secrets/maintainerd-server-env.yaml."; \
 		echo "Create and encrypt them with sops before running this target."; exit 1; \
 	fi; \
 	if [ -n "$(SOPS_EXPECTED_AGE)" ]; then \
-		for file in deploy/secrets/maintainerd-web-env.yaml deploy/secrets/maintainerd-web-bff-env.yaml deploy/secrets/maintainerd-db-env.yaml; do \
+		for file in deploy/secrets/maintainerd-web-env.yaml deploy/secrets/maintainerd-web-bff-env.yaml deploy/secrets/maintainerd-db-env.yaml deploy/secrets/maintainerd-server-env.yaml; do \
 			if ! rg -q "recipient: $(SOPS_EXPECTED_AGE)" "$$file"; then \
 				echo "Encrypted recipients for $$file do not include expected key $(SOPS_EXPECTED_AGE)."; \
 				echo "Re-encrypt with: make sops-encrypt-web-secrets SOPS_AGE_KEY=$(SOPS_EXPECTED_AGE)"; \
@@ -597,6 +601,7 @@ sops-apply-web-secrets:
 	decrypt deploy/secrets/maintainerd-web-env.yaml | kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f -; \
 	decrypt deploy/secrets/maintainerd-web-bff-env.yaml | kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f -; \
 	decrypt deploy/secrets/maintainerd-db-env.yaml | kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f -; \
+	decrypt deploy/secrets/maintainerd-server-env.yaml | kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f -; \
 	echo "Web secrets applied from SOPS."'
 
 .PHONY: sops-apply-bootstrap-secrets
@@ -619,19 +624,51 @@ sops-apply-bootstrap-secrets:
 	decrypt deploy/secrets/maintainerd-bootstrap-env.yaml | kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f -; \
 	echo "Bootstrap secrets applied from SOPS."'
 
+.PHONY: sops-apply-server-secrets
+sops-apply-server-secrets:
+	@echo "Applying server secrets from SOPS [ns=$(NAMESPACE)]"
+	@bash -c 'set -euo pipefail; \
+	if [ ! -f "deploy/secrets/maintainerd-server-env.yaml" ]; then \
+		echo "Missing encrypted secret deploy/secrets/maintainerd-server-env.yaml."; \
+		echo "Create it from deploy/templates/maintainerd-server-env.yaml.tmpl and encrypt with sops."; \
+		exit 1; \
+	fi; \
+	decrypt() { \
+		file="$$1"; \
+		if [ -n "$(SOPS_AGE_KEY_FILE)" ]; then \
+			SOPS_AGE_KEY_FILE="$(SOPS_AGE_KEY_FILE)" $(SOPS_CMD) -d $$file; \
+		else \
+			$(SOPS_CMD) -d $$file; \
+		fi; \
+	}; \
+	decrypt deploy/secrets/maintainerd-server-env.yaml | kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f -; \
+	echo "Server secrets applied from SOPS."'
+
 .PHONY: sops-encrypt-web-secrets
 sops-encrypt-web-secrets:
 	@bash -c 'set -euo pipefail; \
 	if [ -z "$(SOPS_AGE_KEY)" ]; then \
 		echo "Set SOPS_AGE_KEY to the age public key used for encryption."; exit 1; \
 	fi; \
-	for file in deploy/secrets/maintainerd-web-env.yaml deploy/secrets/maintainerd-web-bff-env.yaml deploy/secrets/maintainerd-db-env.yaml; do \
+	for file in deploy/secrets/maintainerd-web-env.yaml deploy/secrets/maintainerd-web-bff-env.yaml deploy/secrets/maintainerd-db-env.yaml deploy/secrets/maintainerd-server-env.yaml; do \
 		if [ ! -f "$$file" ]; then \
 			echo "Missing $$file"; exit 1; \
 		fi; \
 		$(SOPS_CMD) --age $(SOPS_AGE_KEY) -e -i $$file; \
 	done; \
 	echo "Encrypted web secrets with sops.";'
+
+.PHONY: sops-encrypt-server-secrets
+sops-encrypt-server-secrets:
+	@bash -c 'set -euo pipefail; \
+	if [ -z "$(SOPS_AGE_KEY)" ]; then \
+		echo "Set SOPS_AGE_KEY to the age public key used for encryption."; exit 1; \
+	fi; \
+	if [ ! -f "deploy/secrets/maintainerd-server-env.yaml" ]; then \
+		echo "Missing deploy/secrets/maintainerd-server-env.yaml"; exit 1; \
+	fi; \
+	$(SOPS_CMD) --age $(SOPS_AGE_KEY) -e -i deploy/secrets/maintainerd-server-env.yaml; \
+	echo "Encrypted server secrets with sops.";'
 
 .PHONY: sops-encrypt-bootstrap-secrets
 sops-encrypt-bootstrap-secrets:
@@ -660,6 +697,20 @@ sops-envsubst-encrypt:
 	envsubst < deploy/templates/maintainerd-web-bff-env.yaml.tmpl > deploy/secrets/maintainerd-web-bff-env.yaml; \
 	envsubst < deploy/templates/maintainerd-db-env.yaml.tmpl > deploy/secrets/maintainerd-db-env.yaml; \
 	$(MAKE) sops-encrypt-web-secrets SOPS_AGE_KEY="$(SOPS_AGE_KEY)" SOPS_CMD="$(SOPS_CMD)";'
+
+.PHONY: sops-envsubst-encrypt-server
+sops-envsubst-encrypt-server:
+	@bash -c 'set -euo pipefail; \
+	if [ -z "$(SOPS_AGE_KEY)" ]; then \
+		echo "Set SOPS_AGE_KEY to the age public key used for encryption."; exit 1; \
+	fi; \
+	for var in GITHUB_API_TOKEN GITHUB_WEBHOOK_SECRET; do \
+		if [ -z "$${!var:-}" ]; then \
+			echo "Missing required env var: $$var"; exit 1; \
+		fi; \
+	done; \
+	envsubst < deploy/templates/maintainerd-server-env.yaml.tmpl > deploy/secrets/maintainerd-server-env.yaml; \
+	$(MAKE) sops-encrypt-server-secrets SOPS_AGE_KEY="$(SOPS_AGE_KEY)" SOPS_CMD="$(SOPS_CMD)";'
 
 .PHONY: sops-envsubst-encrypt-bootstrap
 sops-envsubst-encrypt-bootstrap:
@@ -693,6 +744,15 @@ sops-edit-web-secrets:
 	edit deploy/secrets/maintainerd-web-env.yaml; \
 	edit deploy/secrets/maintainerd-web-bff-env.yaml; \
 	edit deploy/secrets/maintainerd-db-env.yaml;'
+
+.PHONY: sops-edit-server-secrets
+sops-edit-server-secrets:
+	@bash -c 'set -euo pipefail; \
+	if [ -n "$(SOPS_AGE_KEY_FILE)" ]; then \
+		SOPS_AGE_KEY_FILE="$(SOPS_AGE_KEY_FILE)" $(SOPS_CMD) deploy/secrets/maintainerd-server-env.yaml; \
+	else \
+		$(SOPS_CMD) deploy/secrets/maintainerd-server-env.yaml; \
+	fi;'
 
 .PHONY: sops-edit-bootstrap-secrets
 sops-edit-bootstrap-secrets:

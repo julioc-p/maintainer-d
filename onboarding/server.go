@@ -492,7 +492,9 @@ func (s *EventListener) updateIssue(ctx context.Context, owner, repo string, iss
 	issueComment := &github.IssueComment{
 		Body: github.String(comment),
 	}
-	_, _, err := s.GitHubClient.Issues.CreateComment(ctx, owner, repo, issueNumber, issueComment)
+	commentCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_, _, err := s.GitHubClient.Issues.CreateComment(commentCtx, owner, repo, issueNumber, issueComment)
 	if err != nil {
 		log.Printf("updateIssue: ERR, error creating comment: %v", err)
 	}
