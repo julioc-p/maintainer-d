@@ -22,6 +22,7 @@ import (
 
 	"maintainerd/db"
 	"maintainerd/model"
+	"maintainerd/refparse"
 
 	"github.com/google/go-github/v55/github"
 	"golang.org/x/oauth2"
@@ -2156,7 +2157,12 @@ func buildMaintainerRefMatches(refBody string, maintainers []model.Maintainer) m
 		if handle == "" || handle == "GITHUB_MISSING" {
 			continue
 		}
-		if maintainerRefContains(refBody, handle) {
+		ok, err := refparse.MaintainerRefContains(refBody, handle)
+		if err != nil {
+			log.Printf("maintainer ref parse error (maintainer=%d handle=%q): %v", maintainer.ID, handle, err)
+			continue
+		}
+		if ok {
 			matches[maintainer.ID] = true
 		}
 	}
@@ -2164,7 +2170,7 @@ func buildMaintainerRefMatches(refBody string, maintainers []model.Maintainer) m
 }
 
 func buildMaintainerRefOnly(refBody string, maintainers []model.Maintainer) []string {
-	handles := extractGitHubHandles(refBody)
+	handles := refparse.ExtractGitHubHandles(refBody)
 	if len(handles) == 0 {
 		return nil
 	}
@@ -2196,6 +2202,116 @@ func buildMaintainerRefLines(refBody string) map[string]string {
 	urlRe := regexp.MustCompile(`(?i)github\.com/([a-z0-9-]{1,39})`)
 	listItemRe := regexp.MustCompile(`(?i)^\s*[-*]\s*([a-z0-9][a-z0-9-]{0,38})\b`)
 	keyRe := regexp.MustCompile(`(?i)^\s*github\s*:\s*([a-z0-9][a-z0-9-]{0,38})\b`)
+
+	headerMatch := func(header string) bool {
+		normalized := strings.ToLower(strings.TrimSpace(header))
+		switch normalized {
+		case "github", "github id", "github username", "github handle", "github account":
+			return true
+		}
+		return false
+	}
+	isSeparatorRow := func(cells []string) bool {
+		if len(cells) == 0 {
+			return false
+		}
+		for _, cell := range cells {
+			trimmed := strings.TrimSpace(cell)
+			if trimmed == "" {
+				continue
+			}
+			for _, ch := range trimmed {
+				if ch != '-' && ch != ':' {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	parseRow := func(line string) []string {
+		if !strings.Contains(line, "|") {
+			return nil
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			return nil
+		}
+		trimmed = strings.TrimPrefix(trimmed, "|")
+		trimmed = strings.TrimSuffix(trimmed, "|")
+		parts := strings.Split(trimmed, "|")
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
+		return parts
+	}
+	isValidHandle := func(handle string) bool {
+		handle = strings.ToLower(strings.TrimSpace(handle))
+		if handle == "" || handle == "organizations" || handle == "orgs" || handle == "repos" {
+			return false
+		}
+		if len(handle) > 39 {
+			return false
+		}
+		for i, r := range handle {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+				continue
+			}
+			if r == '_' && i == 0 {
+				return false
+			}
+			return false
+		}
+		return true
+	}
+
+	for i := 0; i+1 < len(lines); i++ {
+		headerCells := parseRow(lines[i])
+		if len(headerCells) == 0 {
+			continue
+		}
+		separatorCells := parseRow(lines[i+1])
+		if len(separatorCells) == 0 || !isSeparatorRow(separatorCells) {
+			continue
+		}
+		githubIndex := -1
+		for idx, cell := range headerCells {
+			if headerMatch(cell) {
+				githubIndex = idx
+				break
+			}
+		}
+		if githubIndex < 0 {
+			continue
+		}
+		for row := i + 2; row < len(lines); row++ {
+			rowLine := lines[row]
+			rowCells := parseRow(rowLine)
+			if len(rowCells) == 0 {
+				break
+			}
+			if isSeparatorRow(rowCells) {
+				break
+			}
+			if githubIndex >= len(rowCells) {
+				continue
+			}
+			cell := strings.TrimSpace(rowCells[githubIndex])
+			if cell == "" {
+				continue
+			}
+			cell = strings.Trim(cell, "`")
+			cell = strings.TrimPrefix(cell, "@")
+			if !isValidHandle(cell) {
+				continue
+			}
+			handle := strings.ToLower(cell)
+			if _, ok := result[handle]; !ok {
+				result[handle] = strings.TrimSpace(rowLine)
+			}
+		}
+		i++
+	}
+
 	for _, line := range lines {
 		for _, match := range atRe.FindAllStringSubmatch(line, -1) {
 			if len(match) < 3 {
@@ -2206,12 +2322,15 @@ func buildMaintainerRefLines(refBody string) map[string]string {
 				result[handle] = strings.TrimSpace(line)
 			}
 		}
-		for _, match := range urlRe.FindAllStringSubmatch(line, -1) {
-			if len(match) < 2 {
+		for _, match := range urlRe.FindAllStringSubmatchIndex(line, -1) {
+			if len(match) < 4 {
 				continue
 			}
-			handle := strings.ToLower(match[1])
+			handle := strings.ToLower(line[match[2]:match[3]])
 			if handle == "organizations" || handle == "orgs" || handle == "repos" {
+				continue
+			}
+			if match[1] < len(line) && line[match[1]] == '/' {
 				continue
 			}
 			if _, ok := result[handle]; !ok {
@@ -2236,61 +2355,4 @@ func buildMaintainerRefLines(refBody string) map[string]string {
 		}
 	}
 	return result
-}
-
-func extractGitHubHandles(refBody string) map[string]struct{} {
-	result := make(map[string]struct{})
-	if refBody == "" {
-		return result
-	}
-	// Match @username
-	atRe := regexp.MustCompile(`(?i)(^|[^a-z0-9_-])@([a-z0-9-]{1,39})`)
-	for _, match := range atRe.FindAllStringSubmatch(refBody, -1) {
-		if len(match) < 3 {
-			continue
-		}
-		handle := strings.ToLower(match[2])
-		result[handle] = struct{}{}
-	}
-	// Match github.com/username
-	urlRe := regexp.MustCompile(`(?i)github\.com/([a-z0-9-]{1,39})`)
-	for _, match := range urlRe.FindAllStringSubmatch(refBody, -1) {
-		if len(match) < 2 {
-			continue
-		}
-		handle := strings.ToLower(match[1])
-		if handle == "organizations" || handle == "orgs" || handle == "repos" {
-			continue
-		}
-		result[handle] = struct{}{}
-	}
-	// Match YAML list items like "- username"
-	listItemRe := regexp.MustCompile(`(?i)^\s*[-*]\s*([a-z0-9][a-z0-9-]{0,38})\b`)
-	// Match YAML key "github: username"
-	keyRe := regexp.MustCompile(`(?i)^\s*github\s*:\s*([a-z0-9][a-z0-9-]{0,38})\b`)
-	for _, line := range strings.Split(refBody, "\n") {
-		if match := listItemRe.FindStringSubmatch(line); len(match) > 1 {
-			handle := strings.ToLower(match[1])
-			if handle != "organizations" && handle != "orgs" && handle != "repos" {
-				result[handle] = struct{}{}
-			}
-		}
-		if match := keyRe.FindStringSubmatch(line); len(match) > 1 {
-			handle := strings.ToLower(match[1])
-			if handle != "organizations" && handle != "orgs" && handle != "repos" {
-				result[handle] = struct{}{}
-			}
-		}
-	}
-	return result
-}
-
-func maintainerRefContains(refBody, handle string) bool {
-	escaped := regexp.QuoteMeta(handle)
-	pattern := fmt.Sprintf(`(?i)(^|[^a-z0-9_-])@?%s([^a-z0-9_-]|$)`, escaped)
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return false
-	}
-	return re.MatchString(refBody)
 }

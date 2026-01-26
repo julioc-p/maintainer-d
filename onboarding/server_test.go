@@ -78,7 +78,7 @@ func TestMockInfrastructure(t *testing.T) {
 		project, maintainers := seedProjectData(t, db)
 
 		assert.Equal(t, "test-project", project.Name)
-		require.Len(t, maintainers, 2)
+		require.Len(t, maintainers, 4)
 		assert.Equal(t, "alice", maintainers[0].GitHubAccount)
 		assert.Equal(t, "bob", maintainers[1].GitHubAccount)
 	})

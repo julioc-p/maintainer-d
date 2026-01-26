@@ -490,7 +490,7 @@ export default function ProjectReconciliationCard({
                           onClick={() => {
                             setDraft({
                               githubHandle: handle,
-                              name: handle,
+                              name: "",
                               email: "",
                               company: "",
                               companyMode: "select",

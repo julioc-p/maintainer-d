@@ -51,16 +51,30 @@ func seedProjectData(t *testing.T, database *gorm.DB) (model.Project, []model.Ma
 
 	maintainers := []model.Maintainer{
 		{
-			Name:             "Alice Developer",
+			Name:             "Alice",
 			Email:            "alice@example.com",
 			GitHubAccount:    "alice",
 			MaintainerStatus: model.ActiveMaintainer,
 			CompanyID:        &company.ID,
 		},
 		{
-			Name:             "Bob Engineer",
+			Name:             "Bob ",
 			Email:            "bob@example.com",
 			GitHubAccount:    "bob",
+			MaintainerStatus: model.ActiveMaintainer,
+			CompanyID:        &company.ID,
+		},
+		{
+			Name:             "Bill",
+			Email:            "",
+			GitHubAccount:    "",
+			MaintainerStatus: model.ActiveMaintainer,
+			CompanyID:        &company.ID,
+		},
+		{
+			Name:             "Ann",
+			Email:            "",
+			GitHubAccount:    "ann",
 			MaintainerStatus: model.ActiveMaintainer,
 			CompanyID:        &company.ID,
 		},
