@@ -123,6 +123,7 @@ type Project struct {
 	Name                string `gorm:"uniqueIndex,not null;check:name <> ''"`
 	ParentProjectID     *uint  `gorm:"index"`
 	Maturity            Maturity
+	GitHubOrg           string `gorm:"size:255"`
 	LegacyMaintainerRef string `gorm:"column:maintainer_ref"`
 	DotProjectYamlRef   string
 	OnboardingIssue     *string
