@@ -25,7 +25,7 @@ type Store interface {
 	CreateMaintainer(projectID uint, name, email, githubHandle, company string) (*model.Maintainer, error)
 	CreateCompany(name string) (*model.Company, error)
 	UpdateProjectMaturity(projectID uint, maturity model.Maturity) error
-	UpdateProjectMaintainerRef(projectID uint, ref string) error
+	UpdateProjectLegacyMaintainerRef(projectID uint, ref string) error
 	UpdateMaintainerStatus(maintainerID uint, status model.MaintainerStatus) error
 	UpdateMaintainersStatus(ids []uint, status model.MaintainerStatus) error
 	UpdateMaintainerGitHubEmail(maintainerID uint, githubEmail string) error

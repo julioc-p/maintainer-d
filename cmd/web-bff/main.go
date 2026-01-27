@@ -510,24 +510,25 @@ type maintainerRefStatus struct {
 }
 
 type projectDetailResponse struct {
-	ID                uint                      `json:"id"`
-	Name              string                    `json:"name"`
-	Maturity          string                    `json:"maturity"`
-	ParentProjectID   *uint                     `json:"parentProjectId,omitempty"`
-	MaintainerRef     string                    `json:"maintainerRef,omitempty"`
-	RefStatus         maintainerRefStatus       `json:"maintainerRefStatus"`
-	MaintainerRefBody string                    `json:"maintainerRefBody,omitempty"`
-	RefOnlyGitHub     []string                  `json:"refOnlyGitHub"`
-	RefLines          map[string]string         `json:"refLines,omitempty"`
-	OnboardingIssue   string                    `json:"onboardingIssue,omitempty"`
-	MailingList       string                    `json:"mailingList,omitempty"`
-	Maintainers       []projectMaintainerDetail `json:"maintainers"`
-	Services          []serviceSummary          `json:"services"`
-	CreatedAt         time.Time                 `json:"createdAt"`
-	UpdatedAt         time.Time                 `json:"updatedAt"`
-	DeletedAt         *time.Time                `json:"deletedAt,omitempty"`
-	UpdatedBy         string                    `json:"updatedBy,omitempty"`
-	UpdatedAuditID    *uint                     `json:"updatedAuditId,omitempty"`
+	ID                      uint                      `json:"id"`
+	Name                    string                    `json:"name"`
+	Maturity                string                    `json:"maturity"`
+	ParentProjectID         *uint                     `json:"parentProjectId,omitempty"`
+	LegacyMaintainerRef     string                    `json:"legacyMaintainerRef,omitempty"`
+	DotProjectYamlRef       string                    `json:"dotProjectYamlRef,omitempty"`
+	RefStatus               maintainerRefStatus       `json:"maintainerRefStatus"`
+	LegacyMaintainerRefBody string                    `json:"legacyMaintainerRefBody,omitempty"`
+	RefOnlyGitHub           []string                  `json:"refOnlyGitHub"`
+	RefLines                map[string]string         `json:"refLines,omitempty"`
+	OnboardingIssue         string                    `json:"onboardingIssue,omitempty"`
+	MailingList             string                    `json:"mailingList,omitempty"`
+	Maintainers             []projectMaintainerDetail `json:"maintainers"`
+	Services                []serviceSummary          `json:"services"`
+	CreatedAt               time.Time                 `json:"createdAt"`
+	UpdatedAt               time.Time                 `json:"updatedAt"`
+	DeletedAt               *time.Time                `json:"deletedAt,omitempty"`
+	UpdatedBy               string                    `json:"updatedBy,omitempty"`
+	UpdatedAuditID          *uint                     `json:"updatedAuditId,omitempty"`
 }
 
 func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
@@ -706,7 +707,7 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 	refMatches := make(map[uint]bool)
 	refOnlyGitHub := []string{}
 	refLines := map[string]string{}
-	refURL := strings.TrimSpace(project.MaintainerRef)
+	refURL := strings.TrimSpace(project.LegacyMaintainerRef)
 	refBody := ""
 	if refURL != "" {
 		refStatus.URL = refURL
@@ -766,26 +767,29 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := projectDetailResponse{
-		ID:                project.ID,
-		Name:              project.Name,
-		Maturity:          string(project.Maturity),
-		ParentProjectID:   project.ParentProjectID,
-		RefStatus:         refStatus,
-		MaintainerRefBody: refBody,
-		RefOnlyGitHub:     refOnlyGitHub,
-		RefLines:          refLines,
-		Maintainers:       maintainers,
-		Services:          services,
-		CreatedAt:         project.CreatedAt,
-		UpdatedAt:         project.UpdatedAt,
-		DeletedAt:         deletedAt,
-		UpdatedBy:         updatedBy,
-		UpdatedAuditID:    updatedAuditID,
+		ID:                      project.ID,
+		Name:                    project.Name,
+		Maturity:                string(project.Maturity),
+		ParentProjectID:         project.ParentProjectID,
+		RefStatus:               refStatus,
+		LegacyMaintainerRefBody: refBody,
+		RefOnlyGitHub:           refOnlyGitHub,
+		RefLines:                refLines,
+		Maintainers:             maintainers,
+		Services:                services,
+		CreatedAt:               project.CreatedAt,
+		UpdatedAt:               project.UpdatedAt,
+		DeletedAt:               deletedAt,
+		UpdatedBy:               updatedBy,
+		UpdatedAuditID:          updatedAuditID,
 	}
 
-	maintainerRef := strings.TrimSpace(project.MaintainerRef)
+	maintainerRef := strings.TrimSpace(project.LegacyMaintainerRef)
 	if maintainerRef != "" {
-		response.MaintainerRef = maintainerRef
+		response.LegacyMaintainerRef = maintainerRef
+	}
+	if project.DotProjectYamlRef != "" {
+		response.DotProjectYamlRef = strings.TrimSpace(project.DotProjectYamlRef)
 	}
 	if project.OnboardingIssue != nil {
 		onboardingIssue := strings.TrimSpace(*project.OnboardingIssue)
@@ -807,7 +811,7 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 }
 
 type projectMaintainerRefUpdateRequest struct {
-	MaintainerRef string `json:"maintainerRef"`
+	LegacyMaintainerRef string `json:"legacyMaintainerRef"`
 }
 
 type projectMaturityUpdateRequest struct {
@@ -834,7 +838,7 @@ func (s *server) handleProjectMaintainerRefUpdate(w http.ResponseWriter, r *http
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	ref := strings.TrimSpace(req.MaintainerRef)
+	ref := strings.TrimSpace(req.LegacyMaintainerRef)
 	if ref != "" && !strings.HasPrefix(ref, "http://") && !strings.HasPrefix(ref, "https://") {
 		http.Error(w, "maintainerRef must be a URL", http.StatusBadRequest)
 		return
@@ -849,7 +853,7 @@ func (s *server) handleProjectMaintainerRefUpdate(w http.ResponseWriter, r *http
 		http.Error(w, "failed to update project", http.StatusInternalServerError)
 		return
 	}
-	if err := s.store.UpdateProjectMaintainerRef(id, ref); err != nil {
+	if err := s.store.UpdateProjectLegacyMaintainerRef(id, ref); err != nil {
 		if errors.Is(err, db.ErrProjectNotFound) {
 			http.Error(w, "project not found", http.StatusNotFound)
 			return
@@ -874,7 +878,7 @@ func (s *server) handleProjectMaintainerRefUpdate(w http.ResponseWriter, r *http
 	}
 	changes := map[string]map[string]string{
 		"maintainerRef": {
-			"from": strings.TrimSpace(beforeProject.MaintainerRef),
+			"from": strings.TrimSpace(beforeProject.LegacyMaintainerRef),
 			"to":   ref,
 		},
 	}

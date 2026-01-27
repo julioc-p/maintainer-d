@@ -79,7 +79,7 @@ func (s *SQLStore) ListProjectsWithMaintainers() ([]model.Project, error) {
 	return projects, err
 }
 
-func (s *SQLStore) UpdateProjectMaintainerRef(projectID uint, ref string) error {
+func (s *SQLStore) UpdateProjectLegacyMaintainerRef(projectID uint, ref string) error {
 	result := s.db.Model(&model.Project{}).
 		Where("id = ?", projectID).
 		Update("maintainer_ref", ref)
