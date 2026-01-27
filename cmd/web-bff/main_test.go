@@ -341,3 +341,110 @@ func TestHandleProjectCreate(t *testing.T) {
 	assert.Equal(t, "Sandbox", response.Maturity)
 	assert.Equal(t, "exampleorg", response.GitHubOrg)
 }
+
+func TestHandleProjectsNamePrefix(t *testing.T) {
+	dbConn := setupPostgresTestDB(t)
+	store := db.NewSQLStore(dbConn)
+	now := time.Now()
+
+	staff := model.StaffMember{
+		Name:          "Staff Tester",
+		GitHubAccount: "staff-tester",
+		Email:         "staff@example.org",
+	}
+	require.NoError(t, dbConn.Create(&staff).Error)
+
+	projectA := model.Project{Name: "KubeFlow", Maturity: model.Sandbox}
+	projectB := model.Project{Name: "Argo", Maturity: model.Graduated}
+	projectC := model.Project{Name: "KubeEdge", Maturity: model.Incubating}
+	require.NoError(t, dbConn.Create(&projectA).Error)
+	require.NoError(t, dbConn.Create(&projectB).Error)
+	require.NoError(t, dbConn.Create(&projectC).Error)
+
+	s := &server{
+		store:      store,
+		sessions:   newSessionStore(log.New(io.Discard, "", 0)),
+		cookieName: defaultSessionCookieName,
+		logger:     log.New(io.Discard, "", 0),
+	}
+
+	staffSessionID := "staff-session"
+	s.sessions.Set(session{
+		ID:        staffSessionID,
+		Login:     staff.GitHubAccount,
+		Role:      roleStaff,
+		CreatedAt: now,
+		ExpiresAt: now.Add(time.Hour),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/projects?namePrefix=ku", nil)
+	req.AddCookie(&http.Cookie{Name: s.cookieName, Value: staffSessionID})
+	rec := httptest.NewRecorder()
+	handler := s.requireSession(http.HandlerFunc(s.handleProjects))
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response projectsResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&response))
+
+	names := make([]string, 0, len(response.Projects))
+	for _, project := range response.Projects {
+		names = append(names, project.Name)
+	}
+	assert.ElementsMatch(t, []string{"KubeFlow", "KubeEdge"}, names)
+}
+
+func TestHandleOnboardingIssues(t *testing.T) {
+	dbConn := setupPostgresTestDB(t)
+	store := db.NewSQLStore(dbConn)
+	now := time.Now()
+
+	staff := model.StaffMember{
+		Name:          "Staff Tester",
+		GitHubAccount: "staff-tester",
+		Email:         "staff@example.org",
+	}
+	require.NoError(t, dbConn.Create(&staff).Error)
+
+	s := &server{
+		store:           store,
+		sessions:        newSessionStore(log.New(io.Discard, "", 0)),
+		cookieName:      defaultSessionCookieName,
+		logger:          log.New(io.Discard, "", 0),
+		githubToken:     "token",
+		onboardingCache: &onboardingIssueCache{},
+	}
+
+	s.fetchIssues = func(ctx context.Context) ([]onboardingIssueSummary, error) {
+		return []onboardingIssueSummary{
+			{
+				Number:      101,
+				Title:       "[PROJECT ONBOARDING] Sample",
+				URL:         "https://github.com/cncf/sandbox/issues/101",
+				ProjectName: "Sample",
+			},
+		}, nil
+	}
+
+	staffSessionID := "staff-session"
+	s.sessions.Set(session{
+		ID:        staffSessionID,
+		Login:     staff.GitHubAccount,
+		Role:      roleStaff,
+		CreatedAt: now,
+		ExpiresAt: now.Add(time.Hour),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/onboarding/issues", nil)
+	req.AddCookie(&http.Cookie{Name: s.cookieName, Value: staffSessionID})
+	rec := httptest.NewRecorder()
+	handler := s.requireSession(http.HandlerFunc(s.handleOnboardingIssues))
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response onboardingIssuesResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&response))
+	require.Len(t, response.Issues, 1)
+	assert.Equal(t, 101, response.Issues[0].Number)
+	assert.Equal(t, "Sample", response.Issues[0].ProjectName)
+}

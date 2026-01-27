@@ -69,6 +69,7 @@ const (
 	contentTypeJSON          = "application/json"
 	roleStaff                = "staff"
 	roleMaintainer           = "maintainer"
+	onboardingIssueCacheTTL  = 15 * time.Minute
 )
 
 type server struct {
@@ -87,6 +88,8 @@ type server struct {
 	logger          *log.Logger
 	githubToken     string
 	fetchIssueTitle func(ctx context.Context, owner, repo string, number int) (string, error)
+	onboardingCache *onboardingIssueCache
+	fetchIssues     func(ctx context.Context) ([]onboardingIssueSummary, error)
 }
 
 type session struct {
@@ -112,6 +115,19 @@ type stateStore struct {
 	mu     sync.RWMutex
 	states map[string]stateEntry
 	ttl    time.Duration
+}
+
+type onboardingIssueSummary struct {
+	Number      int    `json:"number"`
+	Title       string `json:"title"`
+	URL         string `json:"url"`
+	ProjectName string `json:"projectName,omitempty"`
+}
+
+type onboardingIssueCache struct {
+	mu      sync.RWMutex
+	expires time.Time
+	issues  []onboardingIssueSummary
 }
 
 func main() {
@@ -225,8 +241,12 @@ func main() {
 		testMode:     testMode,
 		logger:       logger,
 		githubToken:  githubToken,
+		onboardingCache: &onboardingIssueCache{
+			expires: time.Time{},
+		},
 	}
 	s.fetchIssueTitle = s.fetchIssueTitleFromGitHub
+	s.fetchIssues = s.fetchOnboardingIssuesFromGitHub
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
@@ -244,6 +264,7 @@ func main() {
 	mux.Handle("/api/companies/merge", s.withCORS(s.requireSession(http.HandlerFunc(s.handleCompanyMerge))))
 	mux.Handle("/api/companies", s.withCORS(s.requireSession(http.HandlerFunc(s.handleCompanies))))
 	mux.Handle("/api/onboarding/resolve", s.withCORS(s.requireSession(http.HandlerFunc(s.handleResolveOnboarding))))
+	mux.Handle("/api/onboarding/issues", s.withCORS(s.requireSession(http.HandlerFunc(s.handleOnboardingIssues))))
 	mux.Handle("/api/", s.withCORS(s.requireSession(http.HandlerFunc(s.handleAPINotImplemented))))
 
 	server := &http.Server{
@@ -583,6 +604,7 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := strings.TrimSpace(r.URL.Query().Get("query"))
+	namePrefix := strings.TrimSpace(r.URL.Query().Get("namePrefix"))
 	limit := parseIntParam(r, "limit", 20, 1, 100)
 	offset := parseIntParam(r, "offset", 0, 0, 10_000_000)
 	sortBy := r.URL.Query().Get("sort")
@@ -602,6 +624,9 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	base := s.store.DB().Model(&model.Project{})
 	if len(maturityFilters) > 0 {
 		base = base.Where("projects.maturity IN ?", maturityFilters)
+	}
+	if namePrefix != "" {
+		base = base.Where("LOWER(projects.name) LIKE ?", strings.ToLower(namePrefix)+"%")
 	}
 	if query != "" {
 		like := "%" + strings.ToLower(query) + "%"
@@ -678,6 +703,20 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set(headerContentType, contentTypeJSON)
+	if namePrefix != "" {
+		names := make([]string, 0, len(projects))
+		for _, project := range projects {
+			names = append(names, project.Name)
+		}
+		s.logger.Printf(
+			"web-bff: projects list namePrefix=%q query=%q total=%d returned=%d names=%v",
+			namePrefix,
+			query,
+			total,
+			len(projects),
+			names,
+		)
+	}
 	if err := json.NewEncoder(w).Encode(projectsResponse{
 		Total:    total,
 		Projects: projects,
@@ -991,6 +1030,7 @@ func (s *server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 			s.logger.Printf("web-bff: create project audit log failed: %v", err)
 		}
 	}
+	s.invalidateOnboardingCache()
 	w.Header().Set(headerContentType, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(projectCreateResponse{
 		ID:        project.ID,
@@ -1001,6 +1041,16 @@ func (s *server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		s.logger.Printf("web-bff: create project encode error: %v", err)
 	}
+}
+
+func (s *server) invalidateOnboardingCache() {
+	if s.onboardingCache == nil {
+		return
+	}
+	s.onboardingCache.mu.Lock()
+	s.onboardingCache.expires = time.Time{}
+	s.onboardingCache.issues = nil
+	s.onboardingCache.mu.Unlock()
 }
 
 func ensureProjectNameAvailable(store *db.SQLStore, name string) error {
@@ -1987,6 +2037,132 @@ func (s *server) handleResolveOnboarding(w http.ResponseWriter, r *http.Request)
 	}); err != nil {
 		s.logger.Printf("web-bff: resolve onboarding encode error: %v", err)
 	}
+}
+
+type onboardingIssuesResponse struct {
+	Issues []onboardingIssueSummary `json:"issues"`
+}
+
+func (s *server) handleOnboardingIssues(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	session := sessionFromContext(r.Context())
+	if session == nil || session.Role != roleStaff {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if s.githubToken == "" {
+		s.logger.Printf("web-bff: onboarding issues error: github api token not configured")
+		http.Error(w, "github api token not configured", http.StatusInternalServerError)
+		return
+	}
+	issues, err := s.getOnboardingIssues(r.Context())
+	if err != nil {
+		s.logger.Printf("web-bff: onboarding issues error: %v", err)
+		http.Error(w, "failed to fetch onboarding issues", http.StatusBadGateway)
+		return
+	}
+	s.logger.Printf("web-bff: onboarding issues total=%d", len(issues))
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(onboardingIssuesResponse{Issues: issues}); err != nil {
+		s.logger.Printf("web-bff: onboarding issues encode error: %v", err)
+	}
+}
+
+func (s *server) getOnboardingIssues(ctx context.Context) ([]onboardingIssueSummary, error) {
+	if s.fetchIssues == nil {
+		return nil, fmt.Errorf("onboarding issue fetcher not configured")
+	}
+	if s.onboardingCache == nil {
+		return s.fetchIssues(ctx)
+	}
+	now := time.Now()
+	s.onboardingCache.mu.RLock()
+	if now.Before(s.onboardingCache.expires) && len(s.onboardingCache.issues) > 0 {
+		cached := make([]onboardingIssueSummary, len(s.onboardingCache.issues))
+		copy(cached, s.onboardingCache.issues)
+		s.onboardingCache.mu.RUnlock()
+		return cached, nil
+	}
+	s.onboardingCache.mu.RUnlock()
+
+	issues, err := s.fetchIssues(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.onboardingCache.mu.Lock()
+	s.onboardingCache.issues = issues
+	s.onboardingCache.expires = now.Add(onboardingIssueCacheTTL)
+	s.onboardingCache.mu.Unlock()
+	return issues, nil
+}
+
+func (s *server) fetchOnboardingIssuesFromGitHub(ctx context.Context) ([]onboardingIssueSummary, error) {
+	client := github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
+		AccessToken: s.githubToken,
+	})))
+	query := `repo:cncf/sandbox is:issue state:open label:"project onboarding"`
+	options := &github.SearchOptions{ListOptions: github.ListOptions{PerPage: 100}}
+	issues := make([]onboardingIssueSummary, 0, 128)
+	for {
+		result, resp, err := client.Search.Issues(ctx, query, options)
+		if err != nil {
+			return nil, err
+		}
+		for _, issue := range result.Issues {
+			title := issue.GetTitle()
+			projectName, err := onboarding.GetProjectNameFromProjectTitle(title)
+			if err != nil {
+				projectName = ""
+			}
+			issues = append(issues, onboardingIssueSummary{
+				Number:      issue.GetNumber(),
+				Title:       title,
+				URL:         issue.GetHTMLURL(),
+				ProjectName: projectName,
+			})
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		options.Page = resp.NextPage
+	}
+	s.logger.Printf("web-bff: onboarding issues fetched=%d", len(issues))
+	if s.store == nil {
+		return issues, nil
+	}
+
+	filtered := make([]onboardingIssueSummary, 0, len(issues))
+	for _, issue := range issues {
+		var count int64
+		query := s.store.DB().Model(&model.Project{})
+		if issue.URL != "" {
+			query = query.Where("LOWER(onboarding_issue) = ?", strings.ToLower(issue.URL))
+		}
+		if issue.ProjectName != "" {
+			query = query.Or("LOWER(name) = ?", strings.ToLower(issue.ProjectName))
+		}
+		if err := query.Count(&count).Error; err != nil {
+			return nil, err
+		}
+		if count == 0 {
+			filtered = append(filtered, issue)
+			continue
+		}
+		s.logger.Printf(
+			"web-bff: onboarding issue filtered url=%s projectName=%q",
+			issue.URL,
+			issue.ProjectName,
+		)
+	}
+	s.logger.Printf(
+		"web-bff: onboarding issues remaining=%d filteredOut=%d",
+		len(filtered),
+		len(issues)-len(filtered),
+	)
+	return filtered, nil
 }
 
 func parseGitHubIssueURL(raw string) (string, string, int, error) {

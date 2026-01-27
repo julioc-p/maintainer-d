@@ -1,0 +1,587 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import styles from "./ProjectCreateForm.module.css";
+
+type ProjectSuggestion = {
+  id: number;
+  name: string;
+};
+
+type OnboardingIssue = {
+  number: number;
+  title: string;
+  url: string;
+  projectName?: string;
+};
+
+type ProjectCreateFormProps = {
+  apiBaseUrl: string;
+  onCancel: () => void;
+  onCreated?: (projectId: number) => void;
+};
+
+const maturityOptions = ["Sandbox", "Incubating", "Graduated", "Archived"] as const;
+
+const onboardingIssuePattern = /^https:\/\/github\.com\/cncf\/sandbox\/issues\/\d+$/i;
+
+const parseGitHubOrgFromURL = (raw: string): string => {
+  try {
+    const parsed = new URL(raw);
+    if (
+      parsed.host !== "github.com" &&
+      parsed.host !== "www.github.com" &&
+      parsed.host !== "raw.githubusercontent.com"
+    ) {
+      return "";
+    }
+    const parts = parsed.pathname.replace(/^\/+/, "").split("/");
+    if (parts.length < 2) {
+      return "";
+    }
+    return parts[0];
+  } catch {
+    return "";
+  }
+};
+
+export default function ProjectCreateForm({
+  apiBaseUrl,
+  onCancel,
+  onCreated,
+}: ProjectCreateFormProps) {
+  const [onboardingQuery, setOnboardingQuery] = useState("");
+  const [onboardingIssue, setOnboardingIssue] = useState("");
+  const [projectName, setProjectName] = useState("");
+  const [resolveError, setResolveError] = useState<string | null>(null);
+  const [isResolving, setIsResolving] = useState(false);
+  const [issuesStatus, setIssuesStatus] = useState<"idle" | "loading" | "ready">("idle");
+  const [issuesError, setIssuesError] = useState<string | null>(null);
+  const [issueList, setIssueList] = useState<OnboardingIssue[]>([]);
+  const [issueSuggestions, setIssueSuggestions] = useState<OnboardingIssue[]>([]);
+  const [issueHighlightIndex, setIssueHighlightIndex] = useState(-1);
+  const [issuePopupOpen, setIssuePopupOpen] = useState(false);
+  const [legacyRef, setLegacyRef] = useState("");
+  const [dotProjectRef, setDotProjectRef] = useState("");
+  const [maturity, setMaturity] = useState<(typeof maturityOptions)[number]>("Sandbox");
+  const [githubOrg, setGitHubOrg] = useState("");
+  const [parentQuery, setParentQuery] = useState("");
+  const [parentProjectId, setParentProjectId] = useState<number | null>(null);
+  const [parentSuggestions, setParentSuggestions] = useState<ProjectSuggestion[]>([]);
+  const [parentHighlightIndex, setParentHighlightIndex] = useState<number>(-1);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const lastResolvedIssueRef = useRef<string>("");
+
+  const derivedOrg = useMemo(() => {
+    const legacyOrg = parseGitHubOrgFromURL(legacyRef.trim());
+    const dotOrg = parseGitHubOrgFromURL(dotProjectRef.trim());
+    if (legacyOrg && dotOrg && legacyOrg.toLowerCase() !== dotOrg.toLowerCase()) {
+      return "";
+    }
+    return legacyOrg || dotOrg;
+  }, [legacyRef, dotProjectRef]);
+
+  const orgMismatch =
+    legacyRef.trim() !== "" &&
+    dotProjectRef.trim() !== "" &&
+    parseGitHubOrgFromURL(legacyRef.trim()).toLowerCase() !==
+      parseGitHubOrgFromURL(dotProjectRef.trim()).toLowerCase();
+
+  useEffect(() => {
+    setGitHubOrg(derivedOrg);
+  }, [derivedOrg]);
+
+  const loadIssues = useCallback(async (signal?: AbortSignal, attempt = 0) => {
+    setIssuesStatus("loading");
+    setIssuesError(null);
+    try {
+      const response = await fetch(`${apiBaseUrl}/onboarding/issues`, {
+        credentials: "include",
+        signal,
+      });
+      if (response.status === 401 && attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await loadIssues(signal, attempt + 1);
+        return;
+      }
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `unexpected status ${response.status}`);
+      }
+      const data = (await response.json()) as { issues?: OnboardingIssue[] };
+      const nextIssues = data.issues || [];
+      setIssueList(nextIssues);
+      if (nextIssues.length === 0) {
+        setIssuesError("All open issues have already been added to the database.");
+      } else {
+        setIssuesError(null);
+      }
+      setIssuesStatus("ready");
+    } catch (err) {
+      if ((err as Error).name === "AbortError") {
+        return;
+      }
+      setIssuesStatus("ready");
+      setIssuesError((err as Error).message || "Unable to load onboarding issues.");
+    }
+  }, [apiBaseUrl]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadIssues(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [loadIssues]);
+
+  useEffect(() => {
+    const query = onboardingQuery.trim();
+    if (query === "") {
+      if (issuePopupOpen) {
+        const fallback = issueList.slice(0, 20);
+        setIssueSuggestions(fallback);
+        setIssueHighlightIndex(fallback.length > 0 ? 0 : -1);
+      } else {
+        setIssueSuggestions([]);
+        setIssueHighlightIndex(-1);
+      }
+      return;
+    }
+    if (onboardingIssuePattern.test(query)) {
+      setOnboardingIssue(query);
+      setIssueSuggestions([]);
+      setIssueHighlightIndex(-1);
+      const matched = issueList.find(
+        (issue) => issue.url.toLowerCase() === query.toLowerCase()
+      );
+      if (matched?.projectName) {
+        lastResolvedIssueRef.current = query;
+        setProjectName(matched.projectName);
+        setResolveError(null);
+      }
+      return;
+    }
+    setOnboardingIssue("");
+    const queryLower = query.toLowerCase();
+    const filtered = issueList.filter((issue) => {
+      const titleMatch = issue.title.toLowerCase().includes(queryLower);
+      const projectMatch = (issue.projectName || "").toLowerCase().includes(queryLower);
+      const numberMatch = String(issue.number).includes(queryLower);
+      return titleMatch || projectMatch || numberMatch;
+    });
+    setIssueSuggestions(filtered.slice(0, 15));
+    setIssueHighlightIndex(filtered.length > 0 ? 0 : -1);
+  }, [issueList, onboardingQuery, issuePopupOpen]);
+
+  useEffect(() => {
+    const trimmed = onboardingIssue.trim();
+    if (!onboardingIssuePattern.test(trimmed)) {
+      if (trimmed !== "" && onboardingQuery.trim() !== "" && onboardingIssue === "") {
+        setResolveError("Select a cncf/sandbox onboarding issue.");
+      } else {
+        setResolveError(null);
+      }
+      if (onboardingIssue === "") {
+        setProjectName("");
+      }
+      return;
+    }
+    if (lastResolvedIssueRef.current === trimmed) {
+      return;
+    }
+    const controller = new AbortController();
+    const handle = window.setTimeout(async () => {
+      setIsResolving(true);
+      setResolveError(null);
+      try {
+        const response = await fetch(`${apiBaseUrl}/onboarding/resolve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ issueUrl: trimmed }),
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || "Failed to resolve onboarding issue.");
+        }
+        const data = (await response.json()) as { title?: string; projectName?: string };
+        const resolvedName = (data.projectName || "").trim();
+        if (!resolvedName) {
+          throw new Error("Unable to extract project name from issue title.");
+        }
+        lastResolvedIssueRef.current = trimmed;
+        setProjectName(resolvedName);
+      } catch (err) {
+        if ((err as Error).name === "AbortError") {
+          return;
+        }
+        setResolveError((err as Error).message || "Failed to resolve onboarding issue.");
+        setProjectName("");
+      } finally {
+        setIsResolving(false);
+      }
+    }, 350);
+    return () => {
+      controller.abort();
+      window.clearTimeout(handle);
+    };
+  }, [apiBaseUrl, onboardingIssue, onboardingQuery]);
+
+  useEffect(() => {
+    const query = parentQuery.trim();
+    if (query === "") {
+      setParentSuggestions([]);
+      setParentHighlightIndex(-1);
+      return;
+    }
+    const controller = new AbortController();
+    const handle = window.setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `${apiBaseUrl}/projects?namePrefix=${encodeURIComponent(query)}&limit=12&offset=0`,
+          { credentials: "include", signal: controller.signal }
+        );
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as { projects?: ProjectSuggestion[] };
+        const queryLower = query.toLowerCase();
+        const nextSuggestions = (data.projects || []).filter((project) =>
+          project.name.toLowerCase().startsWith(queryLower)
+        );
+        setParentSuggestions(nextSuggestions);
+        setParentHighlightIndex(nextSuggestions.length > 0 ? 0 : -1);
+      } catch (err) {
+        if ((err as Error).name === "AbortError") {
+          return;
+        }
+        setParentSuggestions([]);
+        setParentHighlightIndex(-1);
+      }
+    }, 300);
+    return () => {
+      controller.abort();
+      window.clearTimeout(handle);
+    };
+  }, [apiBaseUrl, parentQuery]);
+
+  const handleIssueSelect = (issue: OnboardingIssue) => {
+    setOnboardingQuery(issue.url);
+    setOnboardingIssue(issue.url);
+    setIssueSuggestions([]);
+    setIssueHighlightIndex(-1);
+    setIssuePopupOpen(false);
+    if (issue.projectName) {
+      lastResolvedIssueRef.current = issue.url;
+      setProjectName(issue.projectName);
+    } else {
+      lastResolvedIssueRef.current = "";
+      setProjectName("");
+    }
+    setResolveError(null);
+  };
+
+  const handleParentSelect = (project: ProjectSuggestion) => {
+    setParentProjectId(project.id);
+    setParentQuery(project.name);
+    setParentSuggestions([]);
+    setParentHighlightIndex(-1);
+  };
+
+  const handleIssueKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown" && !issuePopupOpen) {
+      event.preventDefault();
+      setIssuePopupOpen(true);
+      const fallback = issueList.slice(0, 20);
+      setIssueSuggestions(fallback);
+      setIssueHighlightIndex(fallback.length > 0 ? 0 : -1);
+      return;
+    }
+    if (issueSuggestions.length === 0) {
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setIssueHighlightIndex((current) => {
+        const next = current + 1;
+        return next >= issueSuggestions.length ? 0 : next;
+      });
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setIssueHighlightIndex((current) => {
+        const next = current - 1;
+        return next < 0 ? issueSuggestions.length - 1 : next;
+      });
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const selected =
+        issueHighlightIndex >= 0 ? issueSuggestions[issueHighlightIndex] : null;
+      if (selected) {
+        handleIssueSelect(selected);
+      }
+    }
+  };
+
+  const handleParentKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (parentSuggestions.length === 0) {
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setParentHighlightIndex((current) => {
+        const next = current + 1;
+        return next >= parentSuggestions.length ? 0 : next;
+      });
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setParentHighlightIndex((current) => {
+        const next = current - 1;
+        return next < 0 ? parentSuggestions.length - 1 : next;
+      });
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const selected =
+        parentHighlightIndex >= 0 ? parentSuggestions[parentHighlightIndex] : null;
+      if (selected) {
+        handleParentSelect(selected);
+      }
+    }
+  };
+
+  const handleSubmit = async () => {
+    setSaveError(null);
+    if (!onboardingIssuePattern.test(onboardingIssue.trim())) {
+      setSaveError("Onboarding issue URL is required.");
+      return;
+    }
+    if (projectName.trim() === "") {
+      setSaveError("Project name could not be resolved from the onboarding issue.");
+      return;
+    }
+    if (!legacyRef.trim() && !dotProjectRef.trim()) {
+      setSaveError("Provide a Legacy Maintainer File or Dot Project YAML URL.");
+      return;
+    }
+    if (orgMismatch || githubOrg.trim() === "") {
+      setSaveError("GitHub Org could not be inferred from the file URLs.");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const payload = {
+        onboardingIssue: onboardingIssue.trim(),
+        projectName: projectName.trim(),
+        githubOrg: githubOrg.trim(),
+        parentProjectId: parentProjectId || undefined,
+        legacyMaintainerRef: legacyRef.trim() || undefined,
+        dotProjectYamlRef: dotProjectRef.trim() || undefined,
+        maturity,
+      };
+      const response = await fetch(`${apiBaseUrl}/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || "Failed to create project.");
+      }
+      const data = (await response.json()) as { id?: number };
+      if (onCreated && typeof data.id === "number") {
+        onCreated(data.id);
+      }
+      await loadIssues();
+    } catch (err) {
+      setSaveError((err as Error).message || "Failed to create project.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className={styles.form}>
+      <label className={styles.field}>
+        <span>Onboarding Issue</span>
+        <div className={styles.fieldWrap}>
+          <input
+            value={onboardingQuery}
+            onChange={(event) => {
+              setOnboardingQuery(event.target.value);
+              setIssuePopupOpen(true);
+            }}
+            onFocus={() => {
+              setIssuePopupOpen(true);
+              if (onboardingQuery.trim() === "") {
+                const fallback = issueList.slice(0, 20);
+                setIssueSuggestions(fallback);
+                setIssueHighlightIndex(fallback.length > 0 ? 0 : -1);
+              }
+            }}
+            onKeyDown={handleIssueKeyDown}
+            placeholder="Search open onboarding issues or paste URL"
+          />
+          <a
+            className={styles.issueLinkButton}
+            href={onboardingIssuePattern.test(onboardingIssue.trim()) ? onboardingIssue : undefined}
+            target="_blank"
+            rel="noreferrer"
+            aria-disabled={!onboardingIssuePattern.test(onboardingIssue.trim())}
+            title="Open onboarding issue"
+            onClick={(event) => {
+              if (!onboardingIssuePattern.test(onboardingIssue.trim())) {
+                event.preventDefault();
+              }
+            }}
+          >
+            Open this Onboarding Issue in a new tab
+          </a>
+          {issuesStatus === "loading" ? (
+            <div className={styles.helper}>Loading onboarding issues…</div>
+          ) : null}
+          {issuesError ? <div className={styles.error}>{issuesError}</div> : null}
+          {issuePopupOpen && !onboardingIssuePattern.test(onboardingQuery.trim()) ? (
+            <div className={styles.issuePopup} role="listbox">
+              <div className={styles.issueList}>
+                {issueSuggestions.length > 0 ? (
+                  issueSuggestions.map((issue, index) => (
+                    <button
+                      key={issue.url}
+                      type="button"
+                      className={`${styles.issueOption} ${
+                        index === issueHighlightIndex ? styles.issueOptionActive : ""
+                      }`}
+                      onClick={() => handleIssueSelect(issue)}
+                      role="option"
+                      aria-selected={index === issueHighlightIndex}
+                    >
+                      {issue.projectName ? (
+                        <>
+                          <span className={styles.issuePrefix}>[PROJECT ONBOARDING]</span>{" "}
+                          <span className={styles.issueName}>{issue.projectName}</span>{" "}
+                          <span className={styles.issueSuffix}>#{issue.number}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className={styles.issueTitleFallback}>{issue.title}</span>{" "}
+                          <span className={styles.issueSuffix}>#{issue.number}</span>
+                        </>
+                      )}
+                    </button>
+                  ))
+                ) : (
+                  <div className={styles.issueEmpty}>No matching onboarding issues.</div>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </label>
+      <label className={styles.field}>
+        <span>Project Name</span>
+        <input
+          className={styles.projectNameValue}
+          value={projectName}
+          readOnly
+          placeholder="Resolved from onboarding issue"
+        />
+      </label>
+      {isResolving ? <div className={styles.helper}>Resolving issue title…</div> : null}
+      {resolveError ? <div className={styles.error}>{resolveError}</div> : null}
+      <label className={styles.field}>
+        <span>GitHub Org</span>
+        <input value={githubOrg} readOnly placeholder="Inferred from file URLs" />
+      </label>
+      <label className={styles.field}>
+        <span>Parent Project</span>
+        <div className={styles.parentFieldWrap}>
+          <input
+            value={parentQuery}
+            onChange={(event) => {
+              setParentQuery(event.target.value);
+              setParentProjectId(null);
+            }}
+            onKeyDown={handleParentKeyDown}
+            placeholder="Search existing projects"
+          />
+          {parentQuery.trim() !== "" ? (
+            <div className={styles.parentPopup} role="listbox">
+              <div className={styles.parentList}>
+                {parentSuggestions.length > 0 ? (
+                  parentSuggestions.map((project, index) => (
+                    <button
+                      key={project.id}
+                      type="button"
+                      className={`${styles.parentOption} ${
+                        index === parentHighlightIndex ? styles.parentOptionActive : ""
+                      }`}
+                      onClick={() => handleParentSelect(project)}
+                      role="option"
+                      aria-selected={index === parentHighlightIndex}
+                    >
+                      {project.name}
+                    </button>
+                  ))
+                ) : (
+                  <div className={styles.parentEmpty}>No matching projects.</div>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </label>
+      <label className={styles.field}>
+        <span>Legacy Maintainer File</span>
+        <input
+          value={legacyRef}
+          onChange={(event) => setLegacyRef(event.target.value)}
+          placeholder="https://github.com/org/repo/path/OWNERS"
+        />
+      </label>
+      <label className={styles.field}>
+        <span>Dot Project YAML</span>
+        <input
+          value={dotProjectRef}
+          onChange={(event) => setDotProjectRef(event.target.value)}
+          placeholder="https://github.com/org/repo/path/.project.yaml"
+        />
+      </label>
+      {orgMismatch ? (
+        <div className={styles.error}>
+          Maintainer file URLs must point to the same GitHub org.
+        </div>
+      ) : null}
+      <label className={styles.field}>
+        <span>Project Maturity</span>
+        <select
+          value={maturity}
+          onChange={(event) =>
+            setMaturity(event.target.value as (typeof maturityOptions)[number])
+          }
+        >
+          {maturityOptions.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </label>
+      {saveError ? <div className={styles.error}>{saveError}</div> : null}
+      <div className={styles.actions}>
+        <button className={styles.cancelButton} type="button" onClick={onCancel}>
+          Cancel
+        </button>
+        <button
+          className={styles.submitButton}
+          type="button"
+          onClick={handleSubmit}
+          disabled={isSaving}
+        >
+          {isSaving ? "Creating…" : "Create New Project"}
+        </button>
+      </div>
+    </div>
+  );
+}
