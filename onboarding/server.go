@@ -518,11 +518,6 @@ func (s *EventListener) updateIssue(owner, repo string, issueNumber int, comment
 		Body: github.String(comment),
 	}
 	log.Printf("updateIssue: INF, posting GitHub comment owner=%s repo=%s issue=%d body=%q", owner, repo, issueNumber, comment)
-	if ctx != nil {
-		if deadline, ok := ctx.Deadline(); ok {
-			log.Printf("updateIssue: DBG, caller deadline=%s", deadline.UTC().Format(time.RFC3339))
-		}
-	}
 	commentCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_, _, err := s.GitHubClient.Issues.CreateComment(commentCtx, owner, repo, issueNumber, issueComment)
