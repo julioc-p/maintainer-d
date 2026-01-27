@@ -72,20 +72,21 @@ const (
 )
 
 type server struct {
-	oauthConfig  *oauth2.Config
-	store        *db.SQLStore
-	sessions     *sessionStore
-	oauthStates  *stateStore
-	cookieName   string
-	stateCookie  string
-	webBaseURL   string
-	cookieDomain string
-	cookieSecure bool
-	sessionTTL   time.Duration
-	webOrigin    string
-	testMode     bool
-	logger       *log.Logger
-	githubToken  string
+	oauthConfig     *oauth2.Config
+	store           *db.SQLStore
+	sessions        *sessionStore
+	oauthStates     *stateStore
+	cookieName      string
+	stateCookie     string
+	webBaseURL      string
+	cookieDomain    string
+	cookieSecure    bool
+	sessionTTL      time.Duration
+	webOrigin       string
+	testMode        bool
+	logger          *log.Logger
+	githubToken     string
+	fetchIssueTitle func(ctx context.Context, owner, repo string, number int) (string, error)
 }
 
 type session struct {
@@ -225,6 +226,7 @@ func main() {
 		logger:       logger,
 		githubToken:  githubToken,
 	}
+	s.fetchIssueTitle = s.fetchIssueTitleFromGitHub
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
@@ -487,6 +489,24 @@ type projectIDRow struct {
 	Name string `gorm:"column:name"`
 }
 
+type projectCreateRequest struct {
+	OnboardingIssue     string `json:"onboardingIssue"`
+	ProjectName         string `json:"projectName,omitempty"`
+	GitHubOrg           string `json:"githubOrg"`
+	ParentProjectID     *uint  `json:"parentProjectId,omitempty"`
+	LegacyMaintainerRef string `json:"legacyMaintainerRef,omitempty"`
+	DotProjectYamlRef   string `json:"dotProjectYamlRef,omitempty"`
+	Maturity            string `json:"maturity,omitempty"`
+}
+
+type projectCreateResponse struct {
+	ID        uint      `json:"id"`
+	Name      string    `json:"name"`
+	Maturity  string    `json:"maturity"`
+	GitHubOrg string    `json:"githubOrg"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 type maintainerSummary struct {
 	ID     uint   `json:"id"`
 	Name   string `json:"name"`
@@ -537,6 +557,10 @@ type projectDetailResponse struct {
 }
 
 func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		s.handleProjectCreate(w, r)
+		return
+	}
 	session := sessionFromContext(r.Context())
 	if session == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -813,6 +837,192 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		s.logger.Printf("web-bff: handleProject encode error: %v", err)
 	}
+}
+
+func (s *server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	session := sessionFromContext(r.Context())
+	if session == nil || session.Role != roleStaff {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var req projectCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	onboardingIssue := strings.TrimSpace(req.OnboardingIssue)
+	if onboardingIssue == "" {
+		http.Error(w, "onboardingIssue is required", http.StatusBadRequest)
+		return
+	}
+	owner, repo, number, err := parseGitHubIssueURL(onboardingIssue)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if owner != "cncf" || repo != "sandbox" {
+		http.Error(w, "onboardingIssue must be from github.com/cncf/sandbox", http.StatusBadRequest)
+		return
+	}
+	if s.githubToken == "" {
+		http.Error(w, "github api token not configured", http.StatusInternalServerError)
+		return
+	}
+	title, err := s.fetchIssueTitle(r.Context(), owner, repo, number)
+	if err != nil {
+		s.logger.Printf("web-bff: create project issue fetch error owner=%s repo=%s issue=%d err=%v", owner, repo, number, err)
+		http.Error(w, "failed to fetch onboarding issue", http.StatusBadGateway)
+		return
+	}
+	projectName, err := onboarding.GetProjectNameFromProjectTitle(title)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.ProjectName != "" && strings.TrimSpace(req.ProjectName) != projectName {
+		http.Error(w, "projectName must match onboarding issue title", http.StatusBadRequest)
+		return
+	}
+	githubOrg := strings.TrimSpace(req.GitHubOrg)
+	legacyRef := strings.TrimSpace(req.LegacyMaintainerRef)
+	dotProjectRef := strings.TrimSpace(req.DotProjectYamlRef)
+	if legacyRef == "" && dotProjectRef == "" {
+		http.Error(w, "legacyMaintainerRef or dotProjectYamlRef is required", http.StatusBadRequest)
+		return
+	}
+	inferredOrg := ""
+	if legacyRef != "" {
+		org, err := parseGitHubOrgFromURL(legacyRef)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		inferredOrg = org
+	}
+	if dotProjectRef != "" {
+		org, err := parseGitHubOrgFromURL(dotProjectRef)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if inferredOrg != "" && !strings.EqualFold(inferredOrg, org) {
+			http.Error(w, "legacyMaintainerRef and dotProjectYamlRef must reference the same GitHub org", http.StatusBadRequest)
+			return
+		}
+		inferredOrg = org
+	}
+	if githubOrg != "" && !strings.EqualFold(githubOrg, inferredOrg) {
+		http.Error(w, "githubOrg must match the GitHub org in the maintainer file URLs", http.StatusBadRequest)
+		return
+	}
+	if inferredOrg == "" {
+		http.Error(w, "failed to infer github org from maintainer file URLs", http.StatusBadRequest)
+		return
+	}
+	githubOrg = inferredOrg
+	if req.ParentProjectID != nil {
+		if _, err := s.store.GetProjectByID(*req.ParentProjectID); err != nil {
+			if errors.Is(err, db.ErrProjectNotFound) {
+				http.Error(w, "parent project not found", http.StatusBadRequest)
+				return
+			}
+			s.logger.Printf("web-bff: create project parent lookup error: %v", err)
+			http.Error(w, "failed to validate parent project", http.StatusInternalServerError)
+			return
+		}
+	}
+	maturity := model.Sandbox
+	if req.Maturity != "" {
+		maturity = model.Maturity(strings.TrimSpace(req.Maturity))
+		if !maturity.IsValid() {
+			http.Error(w, "invalid maturity", http.StatusBadRequest)
+			return
+		}
+	}
+	if err := ensureProjectNameAvailable(s.store, projectName); err != nil {
+		if errors.Is(err, db.ErrProjectExists) {
+			http.Error(w, "project already exists", http.StatusConflict)
+			return
+		}
+		s.logger.Printf("web-bff: create project lookup error: %v", err)
+		http.Error(w, "failed to validate project", http.StatusInternalServerError)
+		return
+	}
+	project := model.Project{
+		Name:                projectName,
+		Maturity:            maturity,
+		GitHubOrg:           githubOrg,
+		ParentProjectID:     req.ParentProjectID,
+		LegacyMaintainerRef: legacyRef,
+		DotProjectYamlRef:   dotProjectRef,
+		OnboardingIssue:     &onboardingIssue,
+	}
+	if err := s.store.DB().Create(&project).Error; err != nil {
+		s.logger.Printf("web-bff: create project error: %v", err)
+		http.Error(w, "failed to create project", http.StatusInternalServerError)
+		return
+	}
+	staffID := lookupStaffID(s.store, session.Login)
+	actorName := session.Login
+	if staffID != nil {
+		var staff model.StaffMember
+		if err := s.store.DB().First(&staff, *staffID).Error; err == nil && staff.Name != "" {
+			actorName = staff.Name
+		}
+	}
+	changes := map[string]map[string]string{
+		"projectName":     {"to": projectName},
+		"githubOrg":       {"to": githubOrg},
+		"maturity":        {"to": string(maturity)},
+		"onboardingIssue": {"to": onboardingIssue},
+	}
+	if metadataJSON, err := json.Marshal(changes); err == nil {
+		event := model.AuditLog{
+			StaffID:  staffID,
+			Action:   "PROJECT_CREATE",
+			Message:  fmt.Sprintf("Project created by %s", actorName),
+			Metadata: string(metadataJSON),
+		}
+		if err := s.store.DB().Create(&event).Error; err != nil {
+			s.logger.Printf("web-bff: create project audit log failed: %v", err)
+		}
+	}
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(projectCreateResponse{
+		ID:        project.ID,
+		Name:      project.Name,
+		Maturity:  string(project.Maturity),
+		GitHubOrg: project.GitHubOrg,
+		CreatedAt: project.CreatedAt,
+	}); err != nil {
+		s.logger.Printf("web-bff: create project encode error: %v", err)
+	}
+}
+
+func ensureProjectNameAvailable(store *db.SQLStore, name string) error {
+	var project model.Project
+	if err := store.DB().Where("name = ?", name).First(&project).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	return db.ErrProjectExists
+}
+
+func lookupStaffID(store *db.SQLStore, login string) *uint {
+	if login == "" {
+		return nil
+	}
+	var staff model.StaffMember
+	if err := store.DB().Where("LOWER(git_hub_account) = ?", strings.ToLower(login)).First(&staff).Error; err != nil {
+		return nil
+	}
+	return &staff.ID
 }
 
 type projectMaintainerRefUpdateRequest struct {
@@ -1799,7 +2009,24 @@ func parseGitHubIssueURL(raw string) (string, string, int, error) {
 	return parts[0], parts[1], number, nil
 }
 
-func (s *server) fetchIssueTitle(ctx context.Context, owner, repo string, number int) (string, error) {
+func parseGitHubOrgFromURL(raw string) (string, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid github url")
+	}
+	host := parsed.Host
+	if host != "github.com" && host != "www.github.com" && host != "raw.githubusercontent.com" {
+		return "", fmt.Errorf("maintainer url must be on github.com or raw.githubusercontent.com")
+	}
+	path := strings.Trim(parsed.Path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		return "", fmt.Errorf("maintainer url must include org and repo")
+	}
+	return parts[0], nil
+}
+
+func (s *server) fetchIssueTitleFromGitHub(ctx context.Context, owner, repo string, number int) (string, error) {
 	client := github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: s.githubToken,
 	})))

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -291,4 +292,52 @@ func TestParseGitHubIssueURL(t *testing.T) {
 		_, _, _, err := parseGitHubIssueURL("https://github.com/cncf/sandbox/issues/")
 		require.Error(t, err)
 	})
+}
+
+func TestHandleProjectCreate(t *testing.T) {
+	dbConn := setupPostgresTestDB(t)
+	store := db.NewSQLStore(dbConn)
+	now := time.Now()
+
+	staff := model.StaffMember{
+		Name:          "Staff Tester",
+		GitHubAccount: "staff-tester",
+		Email:         "staff@example.org",
+	}
+	require.NoError(t, dbConn.Create(&staff).Error)
+
+	s := &server{
+		store:       store,
+		sessions:    newSessionStore(log.New(io.Discard, "", 0)),
+		cookieName:  defaultSessionCookieName,
+		logger:      log.New(io.Discard, "", 0),
+		githubToken: "test-token",
+	}
+
+	staffSessionID := "staff-session"
+	s.sessions.Set(session{
+		ID:        staffSessionID,
+		Login:     staff.GitHubAccount,
+		Role:      roleStaff,
+		CreatedAt: now,
+		ExpiresAt: now.Add(time.Hour),
+	})
+
+	s.fetchIssueTitle = func(_ context.Context, _, _ string, _ int) (string, error) {
+		return "[PROJECT ONBOARDING] Example Project", nil
+	}
+
+	body := `{"onboardingIssue":"https://github.com/cncf/sandbox/issues/123","legacyMaintainerRef":"https://github.com/exampleorg/example/blob/main/OWNERS"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/projects", strings.NewReader(body))
+	req.AddCookie(&http.Cookie{Name: s.cookieName, Value: staffSessionID})
+	rec := httptest.NewRecorder()
+	handler := s.requireSession(http.HandlerFunc(s.handleProjects))
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response projectCreateResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&response))
+	assert.Equal(t, "Example Project", response.Name)
+	assert.Equal(t, "Sandbox", response.Maturity)
+	assert.Equal(t, "exampleorg", response.GitHubOrg)
 }

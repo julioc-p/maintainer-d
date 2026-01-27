@@ -9,6 +9,7 @@ import (
 )
 
 var ErrProjectNotFound = errors.New("project not found")
+var ErrProjectExists = errors.New("project already exists")
 var ErrCompanyExists = errors.New("company already exists")
 
 type Store interface {
