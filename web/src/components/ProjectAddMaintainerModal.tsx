@@ -22,6 +22,52 @@ type ProjectAddMaintainerModalProps = {
   companyOptions: string[];
 };
 
+export function inferNameFromRefLine(line: string, handle: string): string {
+  const normalizedHandle = handle.trim().toLowerCase();
+  const trimmedLine = line.trim();
+
+  if (trimmedLine === "") {
+    return "";
+  }
+
+  const mdLink = trimmedLine.match(/\[([^\]]+)\]\(\s*https?:\/\/github\.com\/([^)\/\s]+)\s*\)/i);
+  if (mdLink && (normalizedHandle === "" || normalizedHandle === mdLink[2].toLowerCase())) {
+    return mdLink[1].trim();
+  }
+
+  const anchor = trimmedLine.match(/<a[^>]*href=["']https?:\/\/github\.com\/([^"'>/]+)["'][^>]*>([^<]+)<\/a>/i);
+  if (anchor && (normalizedHandle === "" || normalizedHandle === anchor[1].toLowerCase())) {
+    return anchor[2].trim();
+  }
+
+  if (normalizedHandle && trimmedLine.includes("|")) {
+    const rawCells = trimmedLine.split("|").map((cell) => cell.trim());
+    const cells = rawCells.filter((cell) => cell !== "");
+    const isSeparatorRow = cells.length > 0 && cells.every((cell) => /^:?-+:?$/.test(cell));
+    if (!isSeparatorRow) {
+      for (let i = 0; i < cells.length; i += 1) {
+        const normalized = cells[i].replace(/^@/, "").replace(/^`|`$/g, "").toLowerCase();
+        if (normalized === normalizedHandle && i > 0) {
+          const candidate = cells[i - 1].replace(/`/g, "").trim();
+          if (candidate.length > 1) {
+            return candidate;
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  if (normalizedHandle) {
+    const around = trimmedLine.match(new RegExp(`([A-Z][A-Za-z.' -]{1,60})\\s*[@(]?${normalizedHandle}[)\\s,;-]?`, "i"));
+    if (around && around[1].trim().length > 1) {
+      return around[1].trim();
+    }
+  }
+
+  return "";
+}
+
 export default function ProjectAddMaintainerModal({
   draft,
   onChange,
@@ -56,25 +102,10 @@ export default function ProjectAddMaintainerModal({
 
     // Name extraction: prefer Markdown link text that points to the handle.
     if (next.name.trim() === "") {
-      const mdLink = line.match(/\[([^\]]+)\]\(\s*https?:\/\/github\.com\/([^)\/\s]+)\s*\)/i);
-      if (mdLink && (handle === "" || handle === mdLink[2].toLowerCase())) {
-        next.name = mdLink[1].trim();
+      const inferred = inferNameFromRefLine(line, handle);
+      if (inferred) {
+        next.name = inferred;
         changed = true;
-      } else {
-        const anchor = line.match(/<a[^>]*href=["']https?:\/\/github\.com\/([^"'>/]+)["'][^>]*>([^<]+)<\/a>/i);
-        if (anchor && (handle === "" || handle === anchor[1].toLowerCase())) {
-          next.name = anchor[2].trim();
-          changed = true;
-        } else {
-          // Fallback: words before @handle or (handle) or handle in the line.
-          if (handle) {
-            const around = line.match(new RegExp(`([A-Z][A-Za-z.' -]{1,60})\\s*[@(]?${handle}[)\\s,;-]?`, "i"));
-            if (around && around[1].trim().length > 1) {
-              next.name = around[1].trim();
-              changed = true;
-            }
-          }
-        }
       }
     }
 
