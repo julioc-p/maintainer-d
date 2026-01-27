@@ -396,7 +396,32 @@ func (s *EventListener) signProjectUpForFOSSA(project model.Project) ([]string, 
 		return actions, fmt.Errorf("signProjectUpForFOSSA: maintainers not found in db for project %s (ID: %d)", project.Name, project.ID)
 	}
 
-	actions = append(actions, fmt.Sprintf("✅  %s has %d maintainers registered in maintainer-d", project.Name, len(maintainers)))
+	eligibleMaintainers, skippedMaintainers := filterEligibleMaintainers(maintainers)
+	actions = append(actions, fmt.Sprintf("✅  %s has %d maintainers registered in maintainer-d", project.Name, len(eligibleMaintainers)))
+	if len(skippedMaintainers) > 0 {
+		var missing []string
+		for _, m := range skippedMaintainers {
+			handle := strings.TrimSpace(m.GitHubAccount)
+			name := strings.TrimSpace(m.Name)
+			display := ""
+			if handle != "" && handle != "GITHUB_MISSING" {
+				display = "@" + handle
+			} else if name != "" {
+				display = name
+			} else {
+				display = "UNKNOWN_MAINTAINER"
+			}
+			var fields []string
+			if strings.TrimSpace(m.Email) == "" || m.Email == "EMAIL_MISSING" {
+				fields = append(fields, "email")
+			}
+			if strings.TrimSpace(m.GitHubAccount) == "" || m.GitHubAccount == "GITHUB_MISSING" {
+				fields = append(fields, "github")
+			}
+			missing = append(missing, fmt.Sprintf("%s (%s)", display, strings.Join(fields, ", ")))
+		}
+		actions = append(actions, fmt.Sprintf("⚠️ Maintainers missing email or GitHub handle: %s", strings.Join(missing, " ")))
+	}
 
 	// Do we have a team already in FOSSA for @project?
 	serviceTeams, err := s.Store.GetProjectServiceTeamMap("FOSSA")
@@ -428,13 +453,13 @@ func (s *EventListener) signProjectUpForFOSSA(project model.Project) ([]string, 
 		}
 		st = &model.ServiceTeam{ServiceTeamID: team.ID}
 	}
-	if len(maintainers) == 0 {
+	if len(eligibleMaintainers) == 0 {
 		actions = append(actions, fmt.Sprintf("Maintainers not yet registered, for project %s", project.Name))
 		return actions, fmt.Errorf(":x: no maintainers found for project %d", project.ID)
 	}
 	var invitedMaintainers []string  // track who we've invited so we can mention them in a single line comment
 	var existingMaintainers []string // track who is already a member over on CNCF FOSSA
-	for _, maintainer := range maintainers {
+	for _, maintainer := range eligibleMaintainers {
 		err := s.FossaClient.SendUserInvitation(maintainer.Email) // TODO See if I can Name the User on FOSSA!
 		if errors.Is(err, fossa.ErrInviteAlreadyExists) {
 			invitedMaintainers = append(invitedMaintainers, maintainer.GitHubAccount) // invited already
@@ -492,6 +517,7 @@ func (s *EventListener) updateIssue(owner, repo string, issueNumber int, comment
 	issueComment := &github.IssueComment{
 		Body: github.String(comment),
 	}
+	log.Printf("updateIssue: INF, posting GitHub comment owner=%s repo=%s issue=%d body=%q", owner, repo, issueNumber, comment)
 	commentCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_, _, err := s.GitHubClient.Issues.CreateComment(commentCtx, owner, repo, issueNumber, issueComment)
@@ -511,7 +537,8 @@ func (s *EventListener) addProjectMaintainersToFossaTeam(project model.Project, 
 	if err != nil {
 		return nil, fmt.Errorf("GetMaintainersByProject: %w", err)
 	}
-	if len(maintainers) == 0 {
+	eligibleMaintainers, _ := filterEligibleMaintainers(maintainers)
+	if len(eligibleMaintainers) == 0 {
 		actions = append(actions, "No registered maintainers found for this project")
 		return actions, nil
 	}
@@ -526,7 +553,7 @@ func (s *EventListener) addProjectMaintainersToFossaTeam(project model.Project, 
 	roleId := FossaTeamAdmin
 
 	// Iterate maintainers
-	for _, m := range maintainers {
+	for _, m := range eligibleMaintainers {
 		handle := m.GitHubAccount
 		email := m.Email
 		// Verify acceptance: ensure no pending invitation for email
@@ -581,6 +608,21 @@ func containsEmail(list []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func filterEligibleMaintainers(maintainers []model.Maintainer) ([]model.Maintainer, []model.Maintainer) {
+	var eligible []model.Maintainer
+	var skipped []model.Maintainer
+	for _, m := range maintainers {
+		email := strings.TrimSpace(m.Email)
+		handle := strings.TrimSpace(m.GitHubAccount)
+		if email == "" || email == "EMAIL_MISSING" || handle == "" || handle == "GITHUB_MISSING" {
+			skipped = append(skipped, m)
+			continue
+		}
+		eligible = append(eligible, m)
+	}
+	return eligible, skipped
 }
 
 // zapNewNopSugar returns a no-op SugaredLogger.
