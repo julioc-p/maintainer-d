@@ -267,3 +267,28 @@ func TestMaintainerCanAccessAllProjectsAndMaintainers(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code)
 	})
 }
+
+func TestParseGitHubIssueURL(t *testing.T) {
+	t.Run("parses github issue url", func(t *testing.T) {
+		owner, repo, number, err := parseGitHubIssueURL("https://github.com/cncf/sandbox/issues/1234")
+		require.NoError(t, err)
+		assert.Equal(t, "cncf", owner)
+		assert.Equal(t, "sandbox", repo)
+		assert.Equal(t, 1234, number)
+	})
+
+	t.Run("rejects non-github host", func(t *testing.T) {
+		_, _, _, err := parseGitHubIssueURL("https://example.com/cncf/sandbox/issues/1")
+		require.Error(t, err)
+	})
+
+	t.Run("rejects non-issue urls", func(t *testing.T) {
+		_, _, _, err := parseGitHubIssueURL("https://github.com/cncf/sandbox/pulls/12")
+		require.Error(t, err)
+	})
+
+	t.Run("rejects missing number", func(t *testing.T) {
+		_, _, _, err := parseGitHubIssueURL("https://github.com/cncf/sandbox/issues/")
+		require.Error(t, err)
+	})
+}

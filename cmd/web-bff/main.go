@@ -22,6 +22,7 @@ import (
 
 	"maintainerd/db"
 	"maintainerd/model"
+	"maintainerd/onboarding"
 	"maintainerd/refparse"
 
 	"github.com/google/go-github/v55/github"
@@ -84,6 +85,7 @@ type server struct {
 	webOrigin    string
 	testMode     bool
 	logger       *log.Logger
+	githubToken  string
 }
 
 type session struct {
@@ -129,6 +131,7 @@ func main() {
 
 	clientID := os.Getenv("GITHUB_OAUTH_CLIENT_ID")
 	clientSecret := os.Getenv("GITHUB_OAUTH_CLIENT_SECRET")
+	githubToken := strings.TrimSpace(os.Getenv("GITHUB_API_TOKEN"))
 	if dbDriver == "sqlite" {
 		logger.Printf(
 			"web-bff: config addr=%s dbDriver=%s dbPath=%s webBaseURL=%s redirectURL=%s cookieName=%s cookieDomain=%s stateCookie=%s sessionTTL=%s cookieSecure=%t testMode=%t clientID=%s",
@@ -220,6 +223,7 @@ func main() {
 		webOrigin:    originFromBaseURL(webBaseURL),
 		testMode:     testMode,
 		logger:       logger,
+		githubToken:  githubToken,
 	}
 
 	mux := http.NewServeMux()
@@ -237,6 +241,7 @@ func main() {
 	mux.Handle("/api/audit", s.withCORS(s.requireSession(http.HandlerFunc(s.handleAudit))))
 	mux.Handle("/api/companies/merge", s.withCORS(s.requireSession(http.HandlerFunc(s.handleCompanyMerge))))
 	mux.Handle("/api/companies", s.withCORS(s.requireSession(http.HandlerFunc(s.handleCompanies))))
+	mux.Handle("/api/onboarding/resolve", s.withCORS(s.requireSession(http.HandlerFunc(s.handleResolveOnboarding))))
 	mux.Handle("/api/", s.withCORS(s.requireSession(http.HandlerFunc(s.handleAPINotImplemented))))
 
 	server := &http.Server{
@@ -1714,6 +1719,95 @@ func (s *server) handleCompanyMerge(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
 		s.logger.Printf("web-bff: handleCompanyMerge encode error: %v", err)
 	}
+}
+
+type resolveOnboardingRequest struct {
+	IssueURL string `json:"issueUrl"`
+}
+
+type resolveOnboardingResponse struct {
+	Title       string `json:"title"`
+	ProjectName string `json:"projectName"`
+}
+
+func (s *server) handleResolveOnboarding(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	session := sessionFromContext(r.Context())
+	if session == nil || session.Role != roleStaff {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var req resolveOnboardingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	issueURL := strings.TrimSpace(req.IssueURL)
+	if issueURL == "" {
+		http.Error(w, "issueUrl is required", http.StatusBadRequest)
+		return
+	}
+	if s.githubToken == "" {
+		http.Error(w, "github api token not configured", http.StatusInternalServerError)
+		return
+	}
+	owner, repo, number, err := parseGitHubIssueURL(issueURL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	title, err := s.fetchIssueTitle(r.Context(), owner, repo, number)
+	if err != nil {
+		s.logger.Printf("web-bff: resolve onboarding error owner=%s repo=%s issue=%d err=%v", owner, repo, number, err)
+		http.Error(w, "failed to fetch onboarding issue", http.StatusBadGateway)
+		return
+	}
+	projectName, err := onboarding.GetProjectNameFromProjectTitle(title)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(resolveOnboardingResponse{
+		Title:       title,
+		ProjectName: projectName,
+	}); err != nil {
+		s.logger.Printf("web-bff: resolve onboarding encode error: %v", err)
+	}
+}
+
+func parseGitHubIssueURL(raw string) (string, string, int, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("invalid issue url")
+	}
+	if parsed.Host != "github.com" && parsed.Host != "www.github.com" {
+		return "", "", 0, fmt.Errorf("issue url must be github.com")
+	}
+	path := strings.Trim(parsed.Path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 || parts[2] != "issues" {
+		return "", "", 0, fmt.Errorf("issue url must be in form https://github.com/org/repo/issues/123")
+	}
+	number, err := strconv.Atoi(parts[3])
+	if err != nil || number <= 0 {
+		return "", "", 0, fmt.Errorf("invalid issue number")
+	}
+	return parts[0], parts[1], number, nil
+}
+
+func (s *server) fetchIssueTitle(ctx context.Context, owner, repo string, number int) (string, error) {
+	client := github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
+		AccessToken: s.githubToken,
+	})))
+	issue, _, err := client.Issues.Get(ctx, owner, repo, number)
+	if err != nil {
+		return "", err
+	}
+	return issue.GetTitle(), nil
 }
 
 func groupCompanyDuplicates(companies []companyDetailResponse) []companyDuplicateGroup {
