@@ -111,10 +111,8 @@ func TestFossaChosen_Basic(t *testing.T) {
 
 		// Create fake issue event
 		issueEvent := createIssueLabeledEvent(project.Name, "fossa", 42)
-		req, _ := http.NewRequest("POST", "/webhook", nil)
-
 		// Execute
-		server.fossaChosen(project.Name, req, issueEvent)
+		server.fossaChosen(project.Name, issueEvent)
 
 		// Verify FOSSA interactions
 		teamsCreated := mockFossa.GetTeamsCreated()
@@ -161,10 +159,8 @@ func TestFossaChosen_Basic(t *testing.T) {
 		server := createTestServer(t, db, mockFossa, mockGitHub)
 
 		issueEvent := createIssueLabeledEvent(project.Name, "fossa", 42)
-		req, _ := http.NewRequest("POST", "/webhook", nil)
-
 		// Execute
-		server.fossaChosen(project.Name, req, issueEvent)
+		server.fossaChosen(project.Name, issueEvent)
 
 		// Verify GitHub comment includes aggregated invitation summary
 		comments := mockGitHub.GetCreatedComments()
@@ -186,10 +182,8 @@ func TestFossaChosen_Basic(t *testing.T) {
 		server := createTestServer(t, db, mockFossa, mockGitHub)
 
 		issueEvent := createIssueLabeledEvent(project.Name, "fossa", 42)
-		req, _ := http.NewRequest("POST", "/webhook", nil)
-
 		// Execute
-		server.fossaChosen(project.Name, req, issueEvent)
+		server.fossaChosen(project.Name, issueEvent)
 
 		// Verify GitHub comment mentions aggregated existing member info
 		comments := mockGitHub.GetCreatedComments()

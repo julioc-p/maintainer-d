@@ -167,7 +167,7 @@ func (s *EventListener) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		if !s.isAuthorizedForProjectAction(actor, project, e.GetIssue()) {
 			// Post an authorization failure comment and return
 			comment := "You are not authorized to perform this action."
-			if err := s.updateIssue(r.Context(), e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment); err != nil {
+			if err := s.updateIssue(e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment); err != nil {
 				log.Printf("handleWebhook: WRN, failed to update GitHub issue: %v", err)
 			}
 			break
@@ -185,7 +185,7 @@ func (s *EventListener) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		if !ok || st == nil || st.ServiceTeamID == 0 {
 			// Team missing; do not create here per design. Inform via comment.
 			msg := fmt.Sprintf("FOSSA team for project %q was not found. Please add the 'fossa' label to the onboarding issue to create the team, then re-run this command.", project.Name)
-			if err := s.updateIssue(r.Context(), e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), msg); err != nil {
+			if err := s.updateIssue(e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), msg); err != nil {
 				log.Printf("handleWebhook: WRN, failed to update GitHub issue: %v", err)
 			}
 			break
@@ -206,7 +206,7 @@ func (s *EventListener) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			comment += fmt.Sprintf("\nNote: encountered some errors: %v\n", err)
 		}
-		if err := s.updateIssue(r.Context(), e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment); err != nil {
+		if err := s.updateIssue(e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment); err != nil {
 			log.Printf("handleWebhook: WRN, failed to update GitHub issue: %v", err)
 		}
 
@@ -225,7 +225,7 @@ func (s *EventListener) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			name := label.GetName()
 			if name == "fossa" {
 				log.Printf("handleWebhook: DBG, [%s](%s) lbl fossa", issueUrl, issueTitle)
-				s.fossaChosen(projectName, r, e)
+				s.fossaChosen(projectName, e)
 			}
 		}
 	}
@@ -233,7 +233,7 @@ func (s *EventListener) handleWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // fossaChosen onboards the registered maintainers on projectName to CNCF FOSSA, posting a comment to the issue
-func (s *EventListener) fossaChosen(projectName string, r *http.Request, e *github.IssuesEvent) {
+func (s *EventListener) fossaChosen(projectName string, e *github.IssuesEvent) {
 
 	log.Printf("fossaChosen: DBG by %s", projectName)
 	project := s.Projects[projectName]
@@ -257,7 +257,7 @@ func (s *EventListener) fossaChosen(projectName string, r *http.Request, e *gith
 			"- Add a comment _/fossa-invite accepted_ to this issue, the maintainer-d onboarding process will add you to you team as a **Team Admin** ([FOSSA RBAC](https://docs.fossa.com/docs/role-based-access-control#team-roles)).\n\n" +
 			"- then, _and only then_, can you start importing your code and documentation repositories into FOSSA: [Getting Started Guide](https://docs.fossa.com/docs/getting-started#importing-a-project).\n\n"
 	}
-	err = s.updateIssue(r.Context(), e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment)
+	err = s.updateIssue(e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment)
 	if err != nil {
 		log.Printf("handleWebhook: WRN, failed to update GitHub issue: %v", err)
 	} else {
@@ -273,7 +273,7 @@ func (s *EventListener) handleLabelCommand(r *http.Request, e *github.IssueComme
 	// Validate command format: /label <fossa|snyk>
 	if len(parts) != 2 {
 		comment := "Invalid `/label` command format. Usage: `/label fossa` or `/label snyk`"
-		if err := s.updateIssue(r.Context(), e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment); err != nil {
+		if err := s.updateIssue(e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment); err != nil {
 			log.Printf("handleLabelCommand: WRN, failed to post error comment: %v", err)
 		}
 		return
@@ -282,7 +282,7 @@ func (s *EventListener) handleLabelCommand(r *http.Request, e *github.IssueComme
 	labelName := strings.ToLower(parts[1])
 	if labelName != "fossa" && labelName != "snyk" {
 		comment := fmt.Sprintf("Invalid label `%s`. Only `fossa` and `snyk` labels are supported.", parts[1])
-		if err := s.updateIssue(r.Context(), e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment); err != nil {
+		if err := s.updateIssue(e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment); err != nil {
 			log.Printf("handleLabelCommand: WRN, failed to post error comment: %v", err)
 		}
 		return
@@ -293,7 +293,7 @@ func (s *EventListener) handleLabelCommand(r *http.Request, e *github.IssueComme
 	if err != nil {
 		log.Printf("handleLabelCommand: WRN, could not parse project name from issue title: %v", err)
 		comment := "Unable to determine project from issue title."
-		if err := s.updateIssue(r.Context(), e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment); err != nil {
+		if err := s.updateIssue(e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment); err != nil {
 			log.Printf("handleLabelCommand: WRN, failed to post error comment: %v", err)
 		}
 		return
@@ -303,7 +303,7 @@ func (s *EventListener) handleLabelCommand(r *http.Request, e *github.IssueComme
 	if !ok {
 		log.Printf("handleLabelCommand: WRN, project %q not found in cache", projectName)
 		comment := fmt.Sprintf("Project `%s` not found in maintainer-d database.", projectName)
-		if err := s.updateIssue(r.Context(), e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment); err != nil {
+		if err := s.updateIssue(e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment); err != nil {
 			log.Printf("handleLabelCommand: WRN, failed to post error comment: %v", err)
 		}
 		return
@@ -335,7 +335,7 @@ func (s *EventListener) handleLabelCommand(r *http.Request, e *github.IssueComme
 	if !isAuthorized {
 		log.Printf("handleLabelCommand: WRN, @%s is not authorized for project %q", actor, projectName)
 		comment := fmt.Sprintf("@%s, looks like you have not yet been registered in maintainer-d. A CNCF Projects Team member will be in touch to assist you further.", actor)
-		if err := s.updateIssue(r.Context(), e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment); err != nil {
+		if err := s.updateIssue(e.GetRepo().GetOwner().GetLogin(), e.GetRepo().GetName(), e.GetIssue().GetNumber(), comment); err != nil {
 			log.Printf("handleLabelCommand: WRN, failed to post error comment: %v", err)
 		}
 		return
@@ -350,7 +350,7 @@ func (s *EventListener) handleLabelCommand(r *http.Request, e *github.IssueComme
 	if err != nil {
 		log.Printf("handleLabelCommand: ERR, failed to add label %q to issue: %v", labelName, err)
 		comment := fmt.Sprintf("Failed to add label `%s` to the issue. Please contact CNCF staff.", labelName)
-		if err := s.updateIssue(r.Context(), owner, repo, issueNumber, comment); err != nil {
+		if err := s.updateIssue(owner, repo, issueNumber, comment); err != nil {
 			log.Printf("handleLabelCommand: WRN, failed to post error comment: %v", err)
 		}
 		return
@@ -366,7 +366,7 @@ func (s *EventListener) handleLabelCommand(r *http.Request, e *github.IssueComme
 		comment = fmt.Sprintf("@%s added the `snyk` label. This indicates the preference to use CNCF Snyk for license scanning.", actor)
 	}
 
-	if err := s.updateIssue(r.Context(), owner, repo, issueNumber, comment); err != nil {
+	if err := s.updateIssue(owner, repo, issueNumber, comment); err != nil {
 		log.Printf("handleLabelCommand: WRN, failed to post confirmation comment: %v", err)
 	}
 }
@@ -488,7 +488,7 @@ func formatHandles(handles []string) string {
 	return "@" + strings.Join(handles, " @")
 }
 
-func (s *EventListener) updateIssue(ctx context.Context, owner, repo string, issueNumber int, comment string) error {
+func (s *EventListener) updateIssue(owner, repo string, issueNumber int, comment string) error {
 	issueComment := &github.IssueComment{
 		Body: github.String(comment),
 	}
