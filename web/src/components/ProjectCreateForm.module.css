@@ -8,6 +8,13 @@
   gap: 14px;
 }
 
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+
 .field {
   display: flex;
   flex-direction: column;

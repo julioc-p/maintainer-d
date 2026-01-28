@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ProjectsList from "./ProjectsList";
 import styles from "./ProjectCreateForm.module.css";
 
 type ProjectSuggestion = {
@@ -176,7 +177,7 @@ export default function ProjectCreateForm({
   useEffect(() => {
     const trimmed = onboardingIssue.trim();
     if (!onboardingIssuePattern.test(trimmed)) {
-      if (trimmed !== "" && onboardingQuery.trim() !== "" && onboardingIssue === "") {
+      if (onboardingQuery.trim() !== "") {
         setResolveError("Select a cncf/sandbox onboarding issue.");
       } else {
         setResolveError(null);
@@ -402,19 +403,22 @@ export default function ProjectCreateForm({
 
   if (issuesEmpty) {
     return (
-      <div className={styles.form}>
-        <div className={styles.info}>
-          All open cncf/sandbox issues labelled{" "}
-          <a
-            className={styles.ghLabelLink}
-            href="https://github.com/cncf/sandbox/issues?q=state%3Aopen%20label%3A%22project%20onboarding%22"
-            target="_blank"
-            rel="noreferrer"
-          >
-            <span className={styles.ghLabel}>project onboarding</span>
-          </a>{" "}
-          are present in the database.
+      <div className={styles.emptyState}>
+        <div className={styles.form}>
+          <div className={styles.info}>
+            All open cncf/sandbox issues labelled{" "}
+            <a
+              className={styles.ghLabelLink}
+              href="https://github.com/cncf/sandbox/issues?q=state%3Aopen%20label%3A%22project%20onboarding%22"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <span className={styles.ghLabel}>project onboarding</span>
+            </a>{" "}
+            are present in the database.
+          </div>
         </div>
+        <ProjectsList />
       </div>
     );
   }
@@ -497,21 +501,10 @@ export default function ProjectCreateForm({
           ) : null}
         </div>
       </label>
-      <label className={styles.field}>
-        <span>Project Name</span>
-        <input
-          className={styles.projectNameValue}
-          value={projectName}
-          readOnly
-          placeholder="Resolved from onboarding issue"
-        />
-      </label>
       {isResolving ? <div className={styles.helper}>Resolving issue title…</div> : null}
       {resolveError ? <div className={styles.error}>{resolveError}</div> : null}
-      <label className={styles.field}>
-        <span>GitHub Org</span>
-        <input value={githubOrg} readOnly placeholder="Inferred from file URLs" />
-      </label>
+      <input type="hidden" value={projectName} data-testid="project-name" readOnly />
+      <input type="hidden" value={githubOrg} data-testid="github-org" readOnly />
       <label className={styles.field}>
         <span>Parent Project</span>
         <div className={styles.parentFieldWrap}>
