@@ -57,6 +57,7 @@ export default function ProjectCreateForm({
   const [isResolving, setIsResolving] = useState(false);
   const [issuesStatus, setIssuesStatus] = useState<"idle" | "loading" | "ready">("idle");
   const [issuesError, setIssuesError] = useState<string | null>(null);
+  const [issuesEmpty, setIssuesEmpty] = useState(false);
   const [issueList, setIssueList] = useState<OnboardingIssue[]>([]);
   const [issueSuggestions, setIssueSuggestions] = useState<OnboardingIssue[]>([]);
   const [issueHighlightIndex, setIssueHighlightIndex] = useState(-1);
@@ -112,17 +113,15 @@ export default function ProjectCreateForm({
       const data = (await response.json()) as { issues?: OnboardingIssue[] };
       const nextIssues = data.issues || [];
       setIssueList(nextIssues);
-      if (nextIssues.length === 0) {
-        setIssuesError("All open issues have already been added to the database.");
-      } else {
-        setIssuesError(null);
-      }
+      setIssuesEmpty(nextIssues.length === 0);
+      setIssuesError(null);
       setIssuesStatus("ready");
     } catch (err) {
       if ((err as Error).name === "AbortError") {
         return;
       }
       setIssuesStatus("ready");
+      setIssuesEmpty(false);
       setIssuesError((err as Error).message || "Unable to load onboarding issues.");
     }
   }, [apiBaseUrl]);
@@ -400,6 +399,25 @@ export default function ProjectCreateForm({
       setIsSaving(false);
     }
   };
+
+  if (issuesEmpty) {
+    return (
+      <div className={styles.form}>
+        <div className={styles.info}>
+          All open cncf/sandbox issues labelled{" "}
+          <a
+            className={styles.ghLabelLink}
+            href="https://github.com/cncf/sandbox/issues?q=state%3Aopen%20label%3A%22project%20onboarding%22"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <span className={styles.ghLabel}>project onboarding</span>
+          </a>{" "}
+          are present in the database.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.form}>

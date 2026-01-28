@@ -75,6 +75,32 @@
   color: #b42318;
 }
 
+.info {
+  font-size: 13px;
+  color: var(--md-card-muted, rgba(15, 23, 42, 0.6));
+}
+
+.ghLabel {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 500;
+  background: rgba(251, 202, 4, 0.18);
+  color: hsl(48, 97%, 50%);
+  border: 1px solid hsla(48, 97%, 50%, 0.3);
+}
+
+.ghLabelLink {
+  text-decoration: none;
+}
+
+.ghLabelLink:hover .ghLabel {
+  background: rgba(251, 202, 4, 0.28);
+}
+
 .issuePopup {
   position: absolute;
   top: calc(100% + 6px);
