@@ -4,11 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ProjectsList from "./ProjectsList";
 import styles from "./ProjectCreateForm.module.css";
 
-type ProjectSuggestion = {
-  id: number;
-  name: string;
-};
-
 type OnboardingIssue = {
   number: number;
   title: string;
@@ -67,10 +62,6 @@ export default function ProjectCreateForm({
   const [dotProjectRef, setDotProjectRef] = useState("");
   const [maturity, setMaturity] = useState<(typeof maturityOptions)[number]>("Sandbox");
   const [githubOrg, setGitHubOrg] = useState("");
-  const [parentQuery, setParentQuery] = useState("");
-  const [parentProjectId, setParentProjectId] = useState<number | null>(null);
-  const [parentSuggestions, setParentSuggestions] = useState<ProjectSuggestion[]>([]);
-  const [parentHighlightIndex, setParentHighlightIndex] = useState<number>(-1);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const lastResolvedIssueRef = useRef<string>("");
@@ -229,44 +220,6 @@ export default function ProjectCreateForm({
     };
   }, [apiBaseUrl, onboardingIssue, onboardingQuery]);
 
-  useEffect(() => {
-    const query = parentQuery.trim();
-    if (query === "") {
-      setParentSuggestions([]);
-      setParentHighlightIndex(-1);
-      return;
-    }
-    const controller = new AbortController();
-    const handle = window.setTimeout(async () => {
-      try {
-        const response = await fetch(
-          `${apiBaseUrl}/projects?namePrefix=${encodeURIComponent(query)}&limit=12&offset=0`,
-          { credentials: "include", signal: controller.signal }
-        );
-        if (!response.ok) {
-          return;
-        }
-        const data = (await response.json()) as { projects?: ProjectSuggestion[] };
-        const queryLower = query.toLowerCase();
-        const nextSuggestions = (data.projects || []).filter((project) =>
-          project.name.toLowerCase().startsWith(queryLower)
-        );
-        setParentSuggestions(nextSuggestions);
-        setParentHighlightIndex(nextSuggestions.length > 0 ? 0 : -1);
-      } catch (err) {
-        if ((err as Error).name === "AbortError") {
-          return;
-        }
-        setParentSuggestions([]);
-        setParentHighlightIndex(-1);
-      }
-    }, 300);
-    return () => {
-      controller.abort();
-      window.clearTimeout(handle);
-    };
-  }, [apiBaseUrl, parentQuery]);
-
   const handleIssueSelect = (issue: OnboardingIssue) => {
     setOnboardingQuery(issue.url);
     setOnboardingIssue(issue.url);
@@ -281,13 +234,6 @@ export default function ProjectCreateForm({
       setProjectName("");
     }
     setResolveError(null);
-  };
-
-  const handleParentSelect = (project: ProjectSuggestion) => {
-    setParentProjectId(project.id);
-    setParentQuery(project.name);
-    setParentSuggestions([]);
-    setParentHighlightIndex(-1);
   };
 
   const handleIssueKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -324,32 +270,6 @@ export default function ProjectCreateForm({
     }
   };
 
-  const handleParentKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (parentSuggestions.length === 0) {
-      return;
-    }
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setParentHighlightIndex((current) => {
-        const next = current + 1;
-        return next >= parentSuggestions.length ? 0 : next;
-      });
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setParentHighlightIndex((current) => {
-        const next = current - 1;
-        return next < 0 ? parentSuggestions.length - 1 : next;
-      });
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      const selected =
-        parentHighlightIndex >= 0 ? parentSuggestions[parentHighlightIndex] : null;
-      if (selected) {
-        handleParentSelect(selected);
-      }
-    }
-  };
-
   const handleSubmit = async () => {
     setSaveError(null);
     if (!onboardingIssuePattern.test(onboardingIssue.trim())) {
@@ -374,7 +294,6 @@ export default function ProjectCreateForm({
         onboardingIssue: onboardingIssue.trim(),
         projectName: projectName.trim(),
         githubOrg: githubOrg.trim(),
-        parentProjectId: parentProjectId || undefined,
         legacyMaintainerRef: legacyRef.trim() || undefined,
         dotProjectYamlRef: dotProjectRef.trim() || undefined,
         maturity,
@@ -505,44 +424,6 @@ export default function ProjectCreateForm({
       {resolveError ? <div className={styles.error}>{resolveError}</div> : null}
       <input type="hidden" value={projectName} data-testid="project-name" readOnly />
       <input type="hidden" value={githubOrg} data-testid="github-org" readOnly />
-      <label className={styles.field}>
-        <span>Parent Project</span>
-        <div className={styles.parentFieldWrap}>
-          <input
-            value={parentQuery}
-            onChange={(event) => {
-              setParentQuery(event.target.value);
-              setParentProjectId(null);
-            }}
-            onKeyDown={handleParentKeyDown}
-            placeholder="Search existing projects"
-          />
-          {parentQuery.trim() !== "" ? (
-            <div className={styles.parentPopup} role="listbox">
-              <div className={styles.parentList}>
-                {parentSuggestions.length > 0 ? (
-                  parentSuggestions.map((project, index) => (
-                    <button
-                      key={project.id}
-                      type="button"
-                      className={`${styles.parentOption} ${
-                        index === parentHighlightIndex ? styles.parentOptionActive : ""
-                      }`}
-                      onClick={() => handleParentSelect(project)}
-                      role="option"
-                      aria-selected={index === parentHighlightIndex}
-                    >
-                      {project.name}
-                    </button>
-                  ))
-                ) : (
-                  <div className={styles.parentEmpty}>No matching projects.</div>
-                )}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      </label>
       <label className={styles.field}>
         <span>Legacy Maintainer File</span>
         <input
