@@ -342,8 +342,8 @@ export default function ProjectReconciliationCard({
   const legacyContent = (
     <div className={styles.legacyStack}>
       <div className={styles.legacyIntro}>
-        Use this roll call to reconcile CNCF records with OWNERS/MAINTAINERS. Add missing people with the ADD MAINTAINER
-        buttons.
+        Compare the Maintainer DB roster with the Legacy Maintainer File. Use ADD MAINTAINER to add any maintainers listed
+        in the project file who are missing from the DB.
       </div>
       <div className={styles.legacyGrid}>
         <div className={styles.column}>
@@ -362,7 +362,7 @@ export default function ProjectReconciliationCard({
 
         <div className={styles.column}>
           <div className={styles.sectionHeader}>
-            <h2 className={styles.sectionTitle}>OWNERS/MAINTAINERS</h2>
+            <h2 className={styles.sectionTitle}>Legacy Maintainer File</h2>
             {canEdit && onUpdateMaintainerRef ? (
               <button
                 className={styles.refEditButton}
@@ -393,7 +393,7 @@ export default function ProjectReconciliationCard({
                     ? "No project admin file is registered for this project."
                     : isRefBroken
                     ? "The project admin file could not be loaded. Update the URL below."
-                    : "Update the project admin file URL."}
+                    : "Update Legacy Maintainer File."}
                 </div>
                 <div className={styles.refInputRow}>
                   <input

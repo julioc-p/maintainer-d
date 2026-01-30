@@ -22,6 +22,7 @@ import (
 
 	"maintainerd/db"
 	"maintainerd/model"
+	"maintainerd/onboarding"
 	"maintainerd/refparse"
 
 	"github.com/google/go-github/v55/github"
@@ -68,22 +69,27 @@ const (
 	contentTypeJSON          = "application/json"
 	roleStaff                = "staff"
 	roleMaintainer           = "maintainer"
+	onboardingIssueCacheTTL  = 15 * time.Minute
 )
 
 type server struct {
-	oauthConfig  *oauth2.Config
-	store        *db.SQLStore
-	sessions     *sessionStore
-	oauthStates  *stateStore
-	cookieName   string
-	stateCookie  string
-	webBaseURL   string
-	cookieDomain string
-	cookieSecure bool
-	sessionTTL   time.Duration
-	webOrigin    string
-	testMode     bool
-	logger       *log.Logger
+	oauthConfig     *oauth2.Config
+	store           *db.SQLStore
+	sessions        *sessionStore
+	oauthStates     *stateStore
+	cookieName      string
+	stateCookie     string
+	webBaseURL      string
+	cookieDomain    string
+	cookieSecure    bool
+	sessionTTL      time.Duration
+	webOrigin       string
+	testMode        bool
+	logger          *log.Logger
+	githubToken     string
+	fetchIssueTitle func(ctx context.Context, owner, repo string, number int) (string, error)
+	onboardingCache *onboardingIssueCache
+	fetchIssues     func(ctx context.Context) ([]onboardingIssueSummary, error)
 }
 
 type session struct {
@@ -111,6 +117,20 @@ type stateStore struct {
 	ttl    time.Duration
 }
 
+type onboardingIssueSummary struct {
+	Number      int    `json:"number"`
+	Title       string `json:"title"`
+	URL         string `json:"url"`
+	ProjectName string `json:"projectName,omitempty"`
+}
+
+type onboardingIssueCache struct {
+	mu      sync.RWMutex
+	expires time.Time
+	raw     []onboardingIssueSummary
+	issues  []onboardingIssueSummary
+}
+
 func main() {
 	logger := log.New(os.Stdout, "", log.LstdFlags)
 
@@ -129,6 +149,7 @@ func main() {
 
 	clientID := os.Getenv("GITHUB_OAUTH_CLIENT_ID")
 	clientSecret := os.Getenv("GITHUB_OAUTH_CLIENT_SECRET")
+	githubToken := strings.TrimSpace(os.Getenv("GITHUB_API_TOKEN"))
 	if dbDriver == "sqlite" {
 		logger.Printf(
 			"web-bff: config addr=%s dbDriver=%s dbPath=%s webBaseURL=%s redirectURL=%s cookieName=%s cookieDomain=%s stateCookie=%s sessionTTL=%s cookieSecure=%t testMode=%t clientID=%s",
@@ -220,7 +241,13 @@ func main() {
 		webOrigin:    originFromBaseURL(webBaseURL),
 		testMode:     testMode,
 		logger:       logger,
+		githubToken:  githubToken,
+		onboardingCache: &onboardingIssueCache{
+			expires: time.Time{},
+		},
 	}
+	s.fetchIssueTitle = s.fetchIssueTitleFromGitHub
+	s.fetchIssues = s.fetchOnboardingIssuesFromGitHub
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
@@ -230,6 +257,7 @@ func main() {
 	mux.Handle("/auth/logout", s.withCORS(http.HandlerFunc(s.handleLogout)))
 	mux.Handle("/api/me", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMe))))
 	mux.Handle("/api/projects", s.withCORS(s.requireSession(http.HandlerFunc(s.handleProjects))))
+	mux.Handle("/api/projects/recent", s.withCORS(s.requireSession(http.HandlerFunc(s.handleRecentProjects))))
 	mux.Handle("/api/projects/", s.withCORS(s.requireSession(http.HandlerFunc(s.handleProject))))
 	mux.Handle("/api/maintainers/status", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMaintainerStatusUpdate))))
 	mux.Handle("/api/maintainers/from-ref", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMaintainerFromRef))))
@@ -237,6 +265,8 @@ func main() {
 	mux.Handle("/api/audit", s.withCORS(s.requireSession(http.HandlerFunc(s.handleAudit))))
 	mux.Handle("/api/companies/merge", s.withCORS(s.requireSession(http.HandlerFunc(s.handleCompanyMerge))))
 	mux.Handle("/api/companies", s.withCORS(s.requireSession(http.HandlerFunc(s.handleCompanies))))
+	mux.Handle("/api/onboarding/resolve", s.withCORS(s.requireSession(http.HandlerFunc(s.handleResolveOnboarding))))
+	mux.Handle("/api/onboarding/issues", s.withCORS(s.requireSession(http.HandlerFunc(s.handleOnboardingIssues))))
 	mux.Handle("/api/", s.withCORS(s.requireSession(http.HandlerFunc(s.handleAPINotImplemented))))
 
 	server := &http.Server{
@@ -477,9 +507,53 @@ type projectsResponse struct {
 	Projects []projectSummary `json:"projects"`
 }
 
+type recentProjectSummary struct {
+	ID                   uint                `json:"id"`
+	Name                 string              `json:"name"`
+	Maturity             string              `json:"maturity"`
+	AddedBy              string              `json:"addedBy"`
+	OnboardingIssue      string              `json:"onboardingIssue,omitempty"`
+	OnboardingIssueState string              `json:"onboardingIssueStatus,omitempty"`
+	LegacyMaintainerRef  string              `json:"legacyMaintainerRef,omitempty"`
+	GitHubOrg            string              `json:"githubOrg,omitempty"`
+	DotProjectYamlRef    string              `json:"dotProjectYamlRef,omitempty"`
+	CreatedAt            string              `json:"createdAt,omitempty"`
+	Maintainers          []maintainerSummary `json:"maintainers,omitempty"`
+}
+
+type recentProjectsResponse struct {
+	Total    int64                  `json:"total"`
+	Projects []recentProjectSummary `json:"projects"`
+}
+
+type recentProjectRow struct {
+	ID              uint      `gorm:"column:id"`
+	Name            string    `gorm:"column:name"`
+	OnboardingIssue *string   `gorm:"column:onboarding_issue"`
+	CreatedAt       time.Time `gorm:"column:created_at"`
+}
+
 type projectIDRow struct {
 	ID   uint   `gorm:"column:id"`
 	Name string `gorm:"column:name"`
+}
+
+type projectCreateRequest struct {
+	OnboardingIssue     string `json:"onboardingIssue"`
+	ProjectName         string `json:"projectName,omitempty"`
+	GitHubOrg           string `json:"githubOrg"`
+	ParentProjectID     *uint  `json:"parentProjectId,omitempty"`
+	LegacyMaintainerRef string `json:"legacyMaintainerRef,omitempty"`
+	DotProjectYamlRef   string `json:"dotProjectYamlRef,omitempty"`
+	Maturity            string `json:"maturity,omitempty"`
+}
+
+type projectCreateResponse struct {
+	ID        uint      `json:"id"`
+	Name      string    `json:"name"`
+	Maturity  string    `json:"maturity"`
+	GitHubOrg string    `json:"githubOrg"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type maintainerSummary struct {
@@ -510,27 +584,32 @@ type maintainerRefStatus struct {
 }
 
 type projectDetailResponse struct {
-	ID                uint                      `json:"id"`
-	Name              string                    `json:"name"`
-	Maturity          string                    `json:"maturity"`
-	ParentProjectID   *uint                     `json:"parentProjectId,omitempty"`
-	MaintainerRef     string                    `json:"maintainerRef,omitempty"`
-	RefStatus         maintainerRefStatus       `json:"maintainerRefStatus"`
-	MaintainerRefBody string                    `json:"maintainerRefBody,omitempty"`
-	RefOnlyGitHub     []string                  `json:"refOnlyGitHub"`
-	RefLines          map[string]string         `json:"refLines,omitempty"`
-	OnboardingIssue   string                    `json:"onboardingIssue,omitempty"`
-	MailingList       string                    `json:"mailingList,omitempty"`
-	Maintainers       []projectMaintainerDetail `json:"maintainers"`
-	Services          []serviceSummary          `json:"services"`
-	CreatedAt         time.Time                 `json:"createdAt"`
-	UpdatedAt         time.Time                 `json:"updatedAt"`
-	DeletedAt         *time.Time                `json:"deletedAt,omitempty"`
-	UpdatedBy         string                    `json:"updatedBy,omitempty"`
-	UpdatedAuditID    *uint                     `json:"updatedAuditId,omitempty"`
+	ID                      uint                      `json:"id"`
+	Name                    string                    `json:"name"`
+	Maturity                string                    `json:"maturity"`
+	ParentProjectID         *uint                     `json:"parentProjectId,omitempty"`
+	LegacyMaintainerRef     string                    `json:"legacyMaintainerRef,omitempty"`
+	DotProjectYamlRef       string                    `json:"dotProjectYamlRef,omitempty"`
+	RefStatus               maintainerRefStatus       `json:"maintainerRefStatus"`
+	LegacyMaintainerRefBody string                    `json:"legacyMaintainerRefBody,omitempty"`
+	RefOnlyGitHub           []string                  `json:"refOnlyGitHub"`
+	RefLines                map[string]string         `json:"refLines,omitempty"`
+	OnboardingIssue         string                    `json:"onboardingIssue,omitempty"`
+	MailingList             string                    `json:"mailingList,omitempty"`
+	Maintainers             []projectMaintainerDetail `json:"maintainers"`
+	Services                []serviceSummary          `json:"services"`
+	CreatedAt               time.Time                 `json:"createdAt"`
+	UpdatedAt               time.Time                 `json:"updatedAt"`
+	DeletedAt               *time.Time                `json:"deletedAt,omitempty"`
+	UpdatedBy               string                    `json:"updatedBy,omitempty"`
+	UpdatedAuditID          *uint                     `json:"updatedAuditId,omitempty"`
 }
 
 func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		s.handleProjectCreate(w, r)
+		return
+	}
 	session := sessionFromContext(r.Context())
 	if session == nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -553,6 +632,7 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := strings.TrimSpace(r.URL.Query().Get("query"))
+	namePrefix := strings.TrimSpace(r.URL.Query().Get("namePrefix"))
 	limit := parseIntParam(r, "limit", 20, 1, 100)
 	offset := parseIntParam(r, "offset", 0, 0, 10_000_000)
 	sortBy := r.URL.Query().Get("sort")
@@ -572,6 +652,9 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	base := s.store.DB().Model(&model.Project{})
 	if len(maturityFilters) > 0 {
 		base = base.Where("projects.maturity IN ?", maturityFilters)
+	}
+	if namePrefix != "" {
+		base = base.Where("LOWER(projects.name) LIKE ?", strings.ToLower(namePrefix)+"%")
 	}
 	if query != "" {
 		like := "%" + strings.ToLower(query) + "%"
@@ -648,11 +731,236 @@ func (s *server) handleProjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set(headerContentType, contentTypeJSON)
+	if namePrefix != "" {
+		names := make([]string, 0, len(projects))
+		for _, project := range projects {
+			names = append(names, project.Name)
+		}
+		s.logger.Printf(
+			"web-bff: projects list namePrefix=%q query=%q total=%d returned=%d names=%v",
+			namePrefix,
+			query,
+			total,
+			len(projects),
+			names,
+		)
+	}
 	if err := json.NewEncoder(w).Encode(projectsResponse{
 		Total:    total,
 		Projects: projects,
 	}); err != nil {
 		s.logger.Printf("web-bff: handleProjects encode error: %v", err)
+	}
+}
+
+func (s *server) handleRecentProjects(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	session := sessionFromContext(r.Context())
+	if session == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if session.Role != roleStaff && session.Role != roleMaintainer {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	limit := parseIntParam(r, "limit", 10, 1, 50)
+	offset := parseIntParam(r, "offset", 0, 0, 10_000_000)
+	sortBy := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sort")))
+	if sortBy == "" {
+		sortBy = "created"
+	}
+	direction := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("direction")))
+	if direction != "asc" {
+		direction = "desc"
+	}
+	maturityFilters := parseCSVParam(r, "maturity")
+	nameFilter := strings.TrimSpace(r.URL.Query().Get("projectName"))
+	maintainerFilter := strings.TrimSpace(r.URL.Query().Get("maintainer"))
+	maintainerFileFilter := strings.TrimSpace(r.URL.Query().Get("maintainerFile"))
+
+	base := s.store.DB().Model(&model.Project{})
+	if len(maturityFilters) > 0 {
+		base = base.Where("projects.maturity IN ?", maturityFilters)
+	}
+	if nameFilter != "" {
+		base = base.Where("LOWER(projects.name) LIKE ?", "%"+strings.ToLower(nameFilter)+"%")
+	}
+	if maintainerFileFilter != "" {
+		base = base.Where(
+			"LOWER(projects.maintainer_ref) LIKE ?",
+			"%"+strings.ToLower(maintainerFileFilter)+"%",
+		)
+	}
+	if maintainerFilter != "" {
+		like := "%" + strings.ToLower(maintainerFilter) + "%"
+		base = base.
+			Joins("LEFT JOIN maintainer_projects mp ON mp.project_id = projects.id").
+			Joins("LEFT JOIN maintainers maint ON maint.id = mp.maintainer_id").
+			Where("LOWER(maint.name) LIKE ? OR LOWER(maint.git_hub_account) LIKE ?", like, like)
+	}
+	var total int64
+	if err := base.Distinct("projects.id").Count(&total).Error; err != nil {
+		s.logger.Printf("web-bff: recent projects count error: %v", err)
+		http.Error(w, "failed to load projects", http.StatusInternalServerError)
+		return
+	}
+
+	var rows []recentProjectRow
+	if err := base.
+		Select("projects.id, projects.name, projects.onboarding_issue, projects.created_at").
+		Distinct("projects.id, projects.name, projects.onboarding_issue, projects.created_at").
+		Find(&rows).Error; err != nil {
+		s.logger.Printf("web-bff: recent projects list error: %v", err)
+		http.Error(w, "failed to load projects", http.StatusInternalServerError)
+		return
+	}
+
+	sort.Slice(rows, func(i, j int) bool {
+		left := rows[i]
+		right := rows[j]
+		switch sortBy {
+		case "name":
+			if direction == "asc" {
+				return strings.ToLower(left.Name) < strings.ToLower(right.Name)
+			}
+			return strings.ToLower(left.Name) > strings.ToLower(right.Name)
+		case "obissue":
+			leftNum, leftHas := issueNumberFromURL(left.OnboardingIssue)
+			rightNum, rightHas := issueNumberFromURL(right.OnboardingIssue)
+			if leftHas != rightHas {
+				return leftHas && !rightHas
+			}
+			if leftNum == rightNum {
+				if direction == "asc" {
+					return left.ID < right.ID
+				}
+				return left.ID > right.ID
+			}
+			if direction == "asc" {
+				return leftNum < rightNum
+			}
+			return leftNum > rightNum
+		default:
+			if direction == "asc" {
+				return left.CreatedAt.Before(right.CreatedAt)
+			}
+			return left.CreatedAt.After(right.CreatedAt)
+		}
+	})
+
+	start := offset
+	if start > len(rows) {
+		start = len(rows)
+	}
+	end := offset + limit
+	if end > len(rows) {
+		end = len(rows)
+	}
+	ids := make([]uint, 0, end-start)
+	for _, row := range rows[start:end] {
+		ids = append(ids, row.ID)
+	}
+
+	var projects []model.Project
+	if len(ids) > 0 {
+		if err := s.store.DB().
+			Preload("Maintainers").
+			Where("projects.id IN ?", ids).
+			Find(&projects).Error; err != nil {
+			s.logger.Printf("web-bff: recent projects load error: %v", err)
+			http.Error(w, "failed to load projects", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	addedBy := make(map[uint]string, len(ids))
+	if len(ids) > 0 {
+		var audits []model.AuditLog
+		if err := s.store.DB().
+			Preload("Staff").
+			Where("project_id IN ? AND action = ?", ids, "PROJECT_CREATE").
+			Order("created_at desc").
+			Find(&audits).Error; err != nil {
+			s.logger.Printf("web-bff: recent projects audit lookup error: %v", err)
+		} else {
+			for _, audit := range audits {
+				if audit.ProjectID == nil {
+					continue
+				}
+				if _, exists := addedBy[*audit.ProjectID]; exists {
+					continue
+				}
+				label := ""
+				if audit.Staff != nil {
+					label = strings.TrimSpace(audit.Staff.Name)
+					if label == "" {
+						label = strings.TrimSpace(audit.Staff.GitHubAccount)
+					}
+				}
+				if label == "" && audit.StaffID != nil {
+					label = fmt.Sprintf("Staff #%d", *audit.StaffID)
+				}
+				if label == "" {
+					label = "—"
+				}
+				addedBy[*audit.ProjectID] = label
+			}
+		}
+	}
+
+	openIssues := map[string]struct{}{}
+	if rawIssues, err := s.getOnboardingIssuesRaw(r.Context()); err == nil {
+		for _, issue := range rawIssues {
+			openIssues[strings.ToLower(issue.URL)] = struct{}{}
+		}
+	}
+
+	response := recentProjectsResponse{
+		Total:    total,
+		Projects: make([]recentProjectSummary, 0, len(projects)),
+	}
+	projectByID := make(map[uint]model.Project, len(projects))
+	for _, project := range projects {
+		projectByID[project.ID] = project
+	}
+	for _, id := range ids {
+		project, ok := projectByID[id]
+		if !ok {
+			continue
+		}
+		entry := recentProjectSummary{
+			ID:                  project.ID,
+			Name:                project.Name,
+			Maturity:            string(project.Maturity),
+			AddedBy:             addedBy[project.ID],
+			LegacyMaintainerRef: strings.TrimSpace(project.LegacyMaintainerRef),
+			GitHubOrg:           strings.TrimSpace(project.GitHubOrg),
+			DotProjectYamlRef:   strings.TrimSpace(project.DotProjectYamlRef),
+			CreatedAt:           project.CreatedAt.Format(time.RFC3339),
+			Maintainers:         summarizeMaintainers(project.Maintainers),
+		}
+		if entry.AddedBy == "" {
+			entry.AddedBy = "—"
+		}
+		if project.OnboardingIssue != nil {
+			entry.OnboardingIssue = strings.TrimSpace(*project.OnboardingIssue)
+			if entry.OnboardingIssue != "" {
+				if _, ok := openIssues[strings.ToLower(entry.OnboardingIssue)]; ok {
+					entry.OnboardingIssueState = "open"
+				} else {
+					entry.OnboardingIssueState = "closed"
+				}
+			}
+		}
+		response.Projects = append(response.Projects, entry)
+	}
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		s.logger.Printf("web-bff: recent projects encode error: %v", err)
 	}
 }
 
@@ -706,7 +1014,7 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 	refMatches := make(map[uint]bool)
 	refOnlyGitHub := []string{}
 	refLines := map[string]string{}
-	refURL := strings.TrimSpace(project.MaintainerRef)
+	refURL := strings.TrimSpace(project.LegacyMaintainerRef)
 	refBody := ""
 	if refURL != "" {
 		refStatus.URL = refURL
@@ -766,26 +1074,29 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := projectDetailResponse{
-		ID:                project.ID,
-		Name:              project.Name,
-		Maturity:          string(project.Maturity),
-		ParentProjectID:   project.ParentProjectID,
-		RefStatus:         refStatus,
-		MaintainerRefBody: refBody,
-		RefOnlyGitHub:     refOnlyGitHub,
-		RefLines:          refLines,
-		Maintainers:       maintainers,
-		Services:          services,
-		CreatedAt:         project.CreatedAt,
-		UpdatedAt:         project.UpdatedAt,
-		DeletedAt:         deletedAt,
-		UpdatedBy:         updatedBy,
-		UpdatedAuditID:    updatedAuditID,
+		ID:                      project.ID,
+		Name:                    project.Name,
+		Maturity:                string(project.Maturity),
+		ParentProjectID:         project.ParentProjectID,
+		RefStatus:               refStatus,
+		LegacyMaintainerRefBody: refBody,
+		RefOnlyGitHub:           refOnlyGitHub,
+		RefLines:                refLines,
+		Maintainers:             maintainers,
+		Services:                services,
+		CreatedAt:               project.CreatedAt,
+		UpdatedAt:               project.UpdatedAt,
+		DeletedAt:               deletedAt,
+		UpdatedBy:               updatedBy,
+		UpdatedAuditID:          updatedAuditID,
 	}
 
-	maintainerRef := strings.TrimSpace(project.MaintainerRef)
+	maintainerRef := strings.TrimSpace(project.LegacyMaintainerRef)
 	if maintainerRef != "" {
-		response.MaintainerRef = maintainerRef
+		response.LegacyMaintainerRef = maintainerRef
+	}
+	if project.DotProjectYamlRef != "" {
+		response.DotProjectYamlRef = strings.TrimSpace(project.DotProjectYamlRef)
 	}
 	if project.OnboardingIssue != nil {
 		onboardingIssue := strings.TrimSpace(*project.OnboardingIssue)
@@ -806,8 +1117,207 @@ func (s *server) handleProject(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	session := sessionFromContext(r.Context())
+	if session == nil || session.Role != roleStaff {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var req projectCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	onboardingIssue := strings.TrimSpace(req.OnboardingIssue)
+	if onboardingIssue == "" {
+		http.Error(w, "onboardingIssue is required", http.StatusBadRequest)
+		return
+	}
+	owner, repo, number, err := parseGitHubIssueURL(onboardingIssue)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if owner != "cncf" || repo != "sandbox" {
+		http.Error(w, "onboardingIssue must be from github.com/cncf/sandbox", http.StatusBadRequest)
+		return
+	}
+	if s.githubToken == "" {
+		http.Error(w, "github api token not configured", http.StatusInternalServerError)
+		return
+	}
+	title, err := s.fetchIssueTitle(r.Context(), owner, repo, number)
+	if err != nil {
+		s.logger.Printf("web-bff: create project issue fetch error owner=%s repo=%s issue=%d err=%v", owner, repo, number, err)
+		http.Error(w, "failed to fetch onboarding issue", http.StatusBadGateway)
+		return
+	}
+	projectName, err := onboarding.GetProjectNameFromProjectTitle(title)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.ProjectName != "" && strings.TrimSpace(req.ProjectName) != projectName {
+		http.Error(w, "projectName must match onboarding issue title", http.StatusBadRequest)
+		return
+	}
+	githubOrg := strings.TrimSpace(req.GitHubOrg)
+	legacyRef := strings.TrimSpace(req.LegacyMaintainerRef)
+	dotProjectRef := strings.TrimSpace(req.DotProjectYamlRef)
+	if legacyRef == "" && dotProjectRef == "" {
+		http.Error(w, "legacyMaintainerRef or dotProjectYamlRef is required", http.StatusBadRequest)
+		return
+	}
+	inferredOrg := ""
+	if legacyRef != "" {
+		org, err := parseGitHubOrgFromURL(legacyRef)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		inferredOrg = org
+	}
+	if dotProjectRef != "" {
+		org, err := parseGitHubOrgFromURL(dotProjectRef)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if inferredOrg != "" && !strings.EqualFold(inferredOrg, org) {
+			http.Error(w, "legacyMaintainerRef and dotProjectYamlRef must reference the same GitHub org", http.StatusBadRequest)
+			return
+		}
+		inferredOrg = org
+	}
+	if githubOrg != "" && !strings.EqualFold(githubOrg, inferredOrg) {
+		http.Error(w, "githubOrg must match the GitHub org in the maintainer file URLs", http.StatusBadRequest)
+		return
+	}
+	if inferredOrg == "" {
+		http.Error(w, "failed to infer github org from maintainer file URLs", http.StatusBadRequest)
+		return
+	}
+	githubOrg = inferredOrg
+	if req.ParentProjectID != nil {
+		if _, err := s.store.GetProjectByID(*req.ParentProjectID); err != nil {
+			if errors.Is(err, db.ErrProjectNotFound) {
+				http.Error(w, "parent project not found", http.StatusBadRequest)
+				return
+			}
+			s.logger.Printf("web-bff: create project parent lookup error: %v", err)
+			http.Error(w, "failed to validate parent project", http.StatusInternalServerError)
+			return
+		}
+	}
+	maturity := model.Sandbox
+	if req.Maturity != "" {
+		maturity = model.Maturity(strings.TrimSpace(req.Maturity))
+		if !maturity.IsValid() {
+			http.Error(w, "invalid maturity", http.StatusBadRequest)
+			return
+		}
+	}
+	if err := ensureProjectNameAvailable(s.store, projectName); err != nil {
+		if errors.Is(err, db.ErrProjectExists) {
+			http.Error(w, "project already exists", http.StatusConflict)
+			return
+		}
+		s.logger.Printf("web-bff: create project lookup error: %v", err)
+		http.Error(w, "failed to validate project", http.StatusInternalServerError)
+		return
+	}
+	project := model.Project{
+		Name:                projectName,
+		Maturity:            maturity,
+		GitHubOrg:           githubOrg,
+		ParentProjectID:     req.ParentProjectID,
+		LegacyMaintainerRef: legacyRef,
+		DotProjectYamlRef:   dotProjectRef,
+		OnboardingIssue:     &onboardingIssue,
+	}
+	if err := s.store.DB().Create(&project).Error; err != nil {
+		s.logger.Printf("web-bff: create project error: %v", err)
+		http.Error(w, "failed to create project", http.StatusInternalServerError)
+		return
+	}
+	staffID := lookupStaffID(s.store, session.Login)
+	actorName := session.Login
+	if staffID != nil {
+		var staff model.StaffMember
+		if err := s.store.DB().First(&staff, *staffID).Error; err == nil && staff.Name != "" {
+			actorName = staff.Name
+		}
+	}
+	changes := map[string]map[string]string{
+		"projectName":     {"to": projectName},
+		"githubOrg":       {"to": githubOrg},
+		"maturity":        {"to": string(maturity)},
+		"onboardingIssue": {"to": onboardingIssue},
+	}
+	if metadataJSON, err := json.Marshal(changes); err == nil {
+		event := model.AuditLog{
+			StaffID:   staffID,
+			Action:    "PROJECT_CREATE",
+			Message:   fmt.Sprintf("Project created by %s", actorName),
+			Metadata:  string(metadataJSON),
+			ProjectID: &project.ID,
+		}
+		if err := s.store.DB().Create(&event).Error; err != nil {
+			s.logger.Printf("web-bff: create project audit log failed: %v", err)
+		}
+	}
+	s.invalidateOnboardingCache()
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(projectCreateResponse{
+		ID:        project.ID,
+		Name:      project.Name,
+		Maturity:  string(project.Maturity),
+		GitHubOrg: project.GitHubOrg,
+		CreatedAt: project.CreatedAt,
+	}); err != nil {
+		s.logger.Printf("web-bff: create project encode error: %v", err)
+	}
+}
+
+func (s *server) invalidateOnboardingCache() {
+	if s.onboardingCache == nil {
+		return
+	}
+	s.onboardingCache.mu.Lock()
+	s.onboardingCache.expires = time.Time{}
+	s.onboardingCache.issues = nil
+	s.onboardingCache.raw = nil
+	s.onboardingCache.mu.Unlock()
+}
+
+func ensureProjectNameAvailable(store *db.SQLStore, name string) error {
+	var project model.Project
+	if err := store.DB().Where("name = ?", name).First(&project).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	return db.ErrProjectExists
+}
+
+func lookupStaffID(store *db.SQLStore, login string) *uint {
+	if login == "" {
+		return nil
+	}
+	var staff model.StaffMember
+	if err := store.DB().Where("LOWER(git_hub_account) = ?", strings.ToLower(login)).First(&staff).Error; err != nil {
+		return nil
+	}
+	return &staff.ID
+}
+
 type projectMaintainerRefUpdateRequest struct {
-	MaintainerRef string `json:"maintainerRef"`
+	LegacyMaintainerRef string `json:"legacyMaintainerRef"`
 }
 
 type projectMaturityUpdateRequest struct {
@@ -834,7 +1344,7 @@ func (s *server) handleProjectMaintainerRefUpdate(w http.ResponseWriter, r *http
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	ref := strings.TrimSpace(req.MaintainerRef)
+	ref := strings.TrimSpace(req.LegacyMaintainerRef)
 	if ref != "" && !strings.HasPrefix(ref, "http://") && !strings.HasPrefix(ref, "https://") {
 		http.Error(w, "maintainerRef must be a URL", http.StatusBadRequest)
 		return
@@ -849,7 +1359,7 @@ func (s *server) handleProjectMaintainerRefUpdate(w http.ResponseWriter, r *http
 		http.Error(w, "failed to update project", http.StatusInternalServerError)
 		return
 	}
-	if err := s.store.UpdateProjectMaintainerRef(id, ref); err != nil {
+	if err := s.store.UpdateProjectLegacyMaintainerRef(id, ref); err != nil {
 		if errors.Is(err, db.ErrProjectNotFound) {
 			http.Error(w, "project not found", http.StatusNotFound)
 			return
@@ -874,7 +1384,7 @@ func (s *server) handleProjectMaintainerRefUpdate(w http.ResponseWriter, r *http
 	}
 	changes := map[string]map[string]string{
 		"maintainerRef": {
-			"from": strings.TrimSpace(beforeProject.MaintainerRef),
+			"from": strings.TrimSpace(beforeProject.LegacyMaintainerRef),
 			"to":   ref,
 		},
 	}
@@ -1710,6 +2220,304 @@ func (s *server) handleCompanyMerge(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
 		s.logger.Printf("web-bff: handleCompanyMerge encode error: %v", err)
 	}
+}
+
+type resolveOnboardingRequest struct {
+	IssueURL string `json:"issueUrl"`
+}
+
+type resolveOnboardingResponse struct {
+	Title       string `json:"title"`
+	ProjectName string `json:"projectName"`
+}
+
+func (s *server) handleResolveOnboarding(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	session := sessionFromContext(r.Context())
+	if session == nil || session.Role != roleStaff {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var req resolveOnboardingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	issueURL := strings.TrimSpace(req.IssueURL)
+	if issueURL == "" {
+		http.Error(w, "issueUrl is required", http.StatusBadRequest)
+		return
+	}
+	if s.githubToken == "" {
+		http.Error(w, "github api token not configured", http.StatusInternalServerError)
+		return
+	}
+	owner, repo, number, err := parseGitHubIssueURL(issueURL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	title, err := s.fetchIssueTitle(r.Context(), owner, repo, number)
+	if err != nil {
+		s.logger.Printf("web-bff: resolve onboarding error owner=%s repo=%s issue=%d err=%v", owner, repo, number, err)
+		http.Error(w, "failed to fetch onboarding issue", http.StatusBadGateway)
+		return
+	}
+	projectName, err := onboarding.GetProjectNameFromProjectTitle(title)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(resolveOnboardingResponse{
+		Title:       title,
+		ProjectName: projectName,
+	}); err != nil {
+		s.logger.Printf("web-bff: resolve onboarding encode error: %v", err)
+	}
+}
+
+type onboardingIssuesResponse struct {
+	Issues []onboardingIssueSummary `json:"issues"`
+}
+
+func (s *server) handleOnboardingIssues(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	session := sessionFromContext(r.Context())
+	if session == nil || session.Role != roleStaff {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if s.githubToken == "" {
+		s.logger.Printf("web-bff: onboarding issues error: github api token not configured")
+		http.Error(w, "github api token not configured", http.StatusInternalServerError)
+		return
+	}
+	issues, err := s.getOnboardingIssues(r.Context())
+	if err != nil {
+		s.logger.Printf("web-bff: onboarding issues error: %v", err)
+		http.Error(w, "failed to fetch onboarding issues", http.StatusBadGateway)
+		return
+	}
+	s.logger.Printf("web-bff: onboarding issues total=%d", len(issues))
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(onboardingIssuesResponse{Issues: issues}); err != nil {
+		s.logger.Printf("web-bff: onboarding issues encode error: %v", err)
+	}
+}
+
+func (s *server) getOnboardingIssues(ctx context.Context) ([]onboardingIssueSummary, error) {
+	if s.fetchIssues == nil {
+		return nil, fmt.Errorf("onboarding issue fetcher not configured")
+	}
+	if s.onboardingCache == nil {
+		raw, filtered, err := s.fetchAndFilterOnboardingIssues(ctx)
+		if err != nil {
+			return nil, err
+		}
+		_ = raw
+		return filtered, nil
+	}
+	now := time.Now()
+	s.onboardingCache.mu.RLock()
+	if now.Before(s.onboardingCache.expires) && len(s.onboardingCache.issues) > 0 {
+		cached := make([]onboardingIssueSummary, len(s.onboardingCache.issues))
+		copy(cached, s.onboardingCache.issues)
+		s.onboardingCache.mu.RUnlock()
+		return cached, nil
+	}
+	s.onboardingCache.mu.RUnlock()
+
+	raw, filtered, err := s.fetchAndFilterOnboardingIssues(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.onboardingCache.mu.Lock()
+	s.onboardingCache.raw = raw
+	s.onboardingCache.issues = filtered
+	s.onboardingCache.expires = now.Add(onboardingIssueCacheTTL)
+	s.onboardingCache.mu.Unlock()
+	return filtered, nil
+}
+
+func (s *server) getOnboardingIssuesRaw(ctx context.Context) ([]onboardingIssueSummary, error) {
+	if s.fetchIssues == nil {
+		return nil, fmt.Errorf("onboarding issue fetcher not configured")
+	}
+	if s.onboardingCache == nil {
+		raw, _, err := s.fetchAndFilterOnboardingIssues(ctx)
+		return raw, err
+	}
+	now := time.Now()
+	s.onboardingCache.mu.RLock()
+	if now.Before(s.onboardingCache.expires) && len(s.onboardingCache.raw) > 0 {
+		cached := make([]onboardingIssueSummary, len(s.onboardingCache.raw))
+		copy(cached, s.onboardingCache.raw)
+		s.onboardingCache.mu.RUnlock()
+		return cached, nil
+	}
+	s.onboardingCache.mu.RUnlock()
+
+	raw, filtered, err := s.fetchAndFilterOnboardingIssues(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.onboardingCache.mu.Lock()
+	s.onboardingCache.raw = raw
+	s.onboardingCache.issues = filtered
+	s.onboardingCache.expires = now.Add(onboardingIssueCacheTTL)
+	s.onboardingCache.mu.Unlock()
+	return raw, nil
+}
+
+func (s *server) fetchAndFilterOnboardingIssues(ctx context.Context) ([]onboardingIssueSummary, []onboardingIssueSummary, error) {
+	raw, err := s.fetchIssues(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if s.store == nil {
+		return raw, raw, nil
+	}
+	filtered := make([]onboardingIssueSummary, 0, len(raw))
+	for _, issue := range raw {
+		var count int64
+		query := s.store.DB().Model(&model.Project{})
+		if issue.URL != "" {
+			query = query.Where("LOWER(onboarding_issue) = ?", strings.ToLower(issue.URL))
+		}
+		if issue.ProjectName != "" {
+			query = query.Or("LOWER(name) = ?", strings.ToLower(issue.ProjectName))
+		}
+		if err := query.Count(&count).Error; err != nil {
+			return nil, nil, err
+		}
+		if count == 0 {
+			filtered = append(filtered, issue)
+			continue
+		}
+		s.logger.Printf(
+			"web-bff: onboarding issue filtered url=%s projectName=%q",
+			issue.URL,
+			issue.ProjectName,
+		)
+	}
+	s.logger.Printf(
+		"web-bff: onboarding issues remaining=%d filteredOut=%d",
+		len(filtered),
+		len(raw)-len(filtered),
+	)
+	return raw, filtered, nil
+}
+
+func (s *server) fetchOnboardingIssuesFromGitHub(ctx context.Context) ([]onboardingIssueSummary, error) {
+	client := github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
+		AccessToken: s.githubToken,
+	})))
+	query := `repo:cncf/sandbox is:issue state:open label:"project onboarding"`
+	options := &github.SearchOptions{ListOptions: github.ListOptions{PerPage: 100}}
+	issues := make([]onboardingIssueSummary, 0, 128)
+	for {
+		result, resp, err := client.Search.Issues(ctx, query, options)
+		if err != nil {
+			return nil, err
+		}
+		for _, issue := range result.Issues {
+			title := issue.GetTitle()
+			projectName, err := onboarding.GetProjectNameFromProjectTitle(title)
+			if err != nil {
+				projectName = ""
+			}
+			issues = append(issues, onboardingIssueSummary{
+				Number:      issue.GetNumber(),
+				Title:       title,
+				URL:         issue.GetHTMLURL(),
+				ProjectName: projectName,
+			})
+		}
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+		options.Page = resp.NextPage
+	}
+	s.logger.Printf("web-bff: onboarding issues fetched=%d", len(issues))
+	return issues, nil
+}
+
+func parseGitHubIssueURL(raw string) (string, string, int, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("invalid issue url")
+	}
+	if parsed.Host != "github.com" && parsed.Host != "www.github.com" {
+		return "", "", 0, fmt.Errorf("issue url must be github.com")
+	}
+	path := strings.Trim(parsed.Path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 || parts[2] != "issues" {
+		return "", "", 0, fmt.Errorf("issue url must be in form https://github.com/org/repo/issues/123")
+	}
+	number, err := strconv.Atoi(parts[3])
+	if err != nil || number <= 0 {
+		return "", "", 0, fmt.Errorf("invalid issue number")
+	}
+	return parts[0], parts[1], number, nil
+}
+
+func issueNumberFromURL(raw *string) (int, bool) {
+	if raw == nil {
+		return 0, false
+	}
+	value := strings.TrimSpace(*raw)
+	if value == "" {
+		return 0, false
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return 0, false
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) < 4 || parts[2] != "issues" {
+		return 0, false
+	}
+	number, err := strconv.Atoi(parts[3])
+	if err != nil || number <= 0 {
+		return 0, false
+	}
+	return number, true
+}
+
+func parseGitHubOrgFromURL(raw string) (string, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid github url")
+	}
+	host := parsed.Host
+	if host != "github.com" && host != "www.github.com" && host != "raw.githubusercontent.com" {
+		return "", fmt.Errorf("maintainer url must be on github.com or raw.githubusercontent.com")
+	}
+	path := strings.Trim(parsed.Path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		return "", fmt.Errorf("maintainer url must include org and repo")
+	}
+	return parts[0], nil
+}
+
+func (s *server) fetchIssueTitleFromGitHub(ctx context.Context, owner, repo string, number int) (string, error) {
+	client := github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
+		AccessToken: s.githubToken,
+	})))
+	issue, _, err := client.Issues.Get(ctx, owner, repo, number)
+	if err != nil {
+		return "", err
+	}
+	return issue.GetTitle(), nil
 }
 
 func groupCompanyDuplicates(companies []companyDetailResponse) []companyDuplicateGroup {

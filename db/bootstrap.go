@@ -188,18 +188,18 @@ func loadMaintainersAndProjects(db *gorm.DB, spreadsheetID, credentialsPath stri
 			var project model.Project
 			if parent.Name == "" {
 				project = model.Project{
-					Name:          projectName,
-					Maturity:      model.Maturity(row[StatusHdr]),
-					MaintainerRef: maintainerRef,
-					MailingList:   mailingListPtr,
+					Name:                projectName,
+					Maturity:            model.Maturity(row[StatusHdr]),
+					LegacyMaintainerRef: maintainerRef,
+					MailingList:         mailingListPtr,
 				}
 			} else {
 				project = model.Project{
-					Name:            projectName,
-					Maturity:        parent.Maturity,
-					MaintainerRef:   maintainerRef,
-					MailingList:     mailingListPtr,
-					ParentProjectID: &parent.ID,
+					Name:                projectName,
+					Maturity:            parent.Maturity,
+					LegacyMaintainerRef: maintainerRef,
+					MailingList:         mailingListPtr,
+					ParentProjectID:     &parent.ID,
 				}
 			}
 			if err := tx.FirstOrCreate(&project, model.Project{Name: project.Name}).Error; err != nil {

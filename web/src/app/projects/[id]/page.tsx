@@ -28,13 +28,14 @@ type ProjectDetail = {
   name: string;
   maturity: string;
   parentProjectId?: number | null;
-  maintainerRef?: string;
+  legacyMaintainerRef?: string;
+  dotProjectYamlRef?: string;
   maintainerRefStatus: {
     url?: string;
     status: string;
     checkedAt?: string | null;
   };
-  maintainerRefBody?: string;
+  legacyMaintainerRefBody?: string;
   refOnlyGitHub: string[];
   refLines?: Record<string, string>;
   onboardingIssue?: string;
@@ -60,11 +61,11 @@ const projectDataHasChanged = (
     current.name !== next.name ||
     current.maturity !== next.maturity ||
     current.parentProjectId !== next.parentProjectId ||
-    current.maintainerRef !== next.maintainerRef ||
+    current.legacyMaintainerRef !== next.legacyMaintainerRef ||
     current.maintainerRefStatus.status !== next.maintainerRefStatus.status ||
     current.maintainerRefStatus.url !== next.maintainerRefStatus.url ||
     current.maintainerRefStatus.checkedAt !== next.maintainerRefStatus.checkedAt ||
-    current.maintainerRefBody !== next.maintainerRefBody ||
+    current.legacyMaintainerRefBody !== next.legacyMaintainerRefBody ||
     current.refOnlyGitHub.length !== next.refOnlyGitHub.length ||
     current.onboardingIssue !== next.onboardingIssue ||
     current.mailingList !== next.mailingList ||
@@ -293,9 +294,9 @@ export default function ProjectPage() {
             <ProjectReconciliationCard
               name={project.name}
               maturity={project.maturity}
-              maintainerRef={project.maintainerRef}
+              maintainerRef={project.legacyMaintainerRef}
               maintainerRefStatus={project.maintainerRefStatus}
-              maintainerRefBody={project.maintainerRefBody}
+              maintainerRefBody={project.legacyMaintainerRefBody}
               refOnlyGitHub={project.refOnlyGitHub}
               refLines={project.refLines}
               onboardingIssue={project.onboardingIssue}
@@ -334,7 +335,7 @@ export default function ProjectPage() {
                   method: "PATCH",
                   headers: { "Content-Type": "application/json" },
                   credentials: "include",
-                  body: JSON.stringify({ maintainerRef: nextRef }),
+                  body: JSON.stringify({ legacyMaintainerRef: nextRef }),
                 });
                 if (!response.ok) {
                   setError("Unable to update project admin file");

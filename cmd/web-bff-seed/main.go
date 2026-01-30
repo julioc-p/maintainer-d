@@ -25,6 +25,7 @@ func main() {
 	}
 
 	if err := db.AutoMigrate(
+		&model.AuditLog{},
 		&model.Company{},
 		&model.Foundation{},
 		&model.Project{},
@@ -33,6 +34,7 @@ func main() {
 		&model.FoundationOfficer{},
 		&model.Collaborator{},
 		&model.MaintainerProject{},
+		&model.MaintainerRefCache{},
 		&model.Service{},
 		&model.ServiceTeam{},
 		&model.ServiceUser{},

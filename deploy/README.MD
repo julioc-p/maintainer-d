@@ -53,7 +53,9 @@ TEXT name
         TEXT name
         INTEGER parent_project_id "FK to projects.id"
         TEXT maturity
+        TEXT github_org
         TEXT maintainer_ref
+        TEXT dot_project_yaml_ref
         TEXT onboarding_issue
         TEXT mailing_list
     }

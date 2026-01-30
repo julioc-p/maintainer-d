@@ -223,6 +223,11 @@ export default function AppShell({
               {mounted ? (theme === "light" ? <MoonIcon /> : <SunIcon />) : <MoonIcon />}
             </button>
             {me?.role === "staff" ? (
+              <Link className={styles.createProjectButton} href="/create/project">
+                New Project…
+              </Link>
+            ) : null}
+            {me?.role === "staff" ? (
               <Link className={styles.auditButton} href="/audit">
                 Audit
               </Link>

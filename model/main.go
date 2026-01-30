@@ -120,14 +120,16 @@ type Collaborator struct {
 }
 type Project struct {
 	gorm.Model
-	Name            string `gorm:"uniqueIndex,not null;check:name <> ''"`
-	ParentProjectID *uint  `gorm:"index"`
-	Maturity        Maturity
-	MaintainerRef   string
-	OnboardingIssue *string
-	MailingList     *string      `gorm:"size:254;default:MML_MISSING"`
-	Maintainers     []Maintainer `gorm:"many2many:maintainer_projects;joinForeignKey:ProjectID;joinReferences:MaintainerID"`
-	Services        []Service    `gorm:"many2many:service_projects;joinForeignKey:ProjectID;joinReferences:ServiceID"`
+	Name                string `gorm:"uniqueIndex,not null;check:name <> ''"`
+	ParentProjectID     *uint  `gorm:"index"`
+	Maturity            Maturity
+	GitHubOrg           string `gorm:"size:255"`
+	LegacyMaintainerRef string `gorm:"column:maintainer_ref"`
+	DotProjectYamlRef   string
+	OnboardingIssue     *string
+	MailingList         *string      `gorm:"size:254;default:MML_MISSING"`
+	Maintainers         []Maintainer `gorm:"many2many:maintainer_projects;joinForeignKey:ProjectID;joinReferences:MaintainerID"`
+	Services            []Service    `gorm:"many2many:service_projects;joinForeignKey:ProjectID;joinReferences:ServiceID"`
 }
 
 type MaintainerProject struct {

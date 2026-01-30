@@ -1,0 +1,21 @@
+.main {
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 32px 20px 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.header h1 {
+  margin: 0 0 6px;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--md-card-text, #0f172a);
+}
+
+.header p {
+  margin: 0;
+  color: var(--md-card-muted, rgba(15, 23, 42, 0.6));
+  font-size: 14px;
+}

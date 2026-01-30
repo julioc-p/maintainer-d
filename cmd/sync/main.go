@@ -276,8 +276,8 @@ func syncProjects(ctx context.Context, store *db.SQLStore, c client.Client, ns s
 		if p.MailingList != nil {
 			spec.MailingList = *p.MailingList
 		}
-		if p.MaintainerRef != "" {
-			spec.MaintainerLeadRef = &apis.ResourceReference{Name: sanitizeName(p.MaintainerRef)}
+		if p.LegacyMaintainerRef != "" {
+			spec.MaintainerLeadRef = &apis.ResourceReference{Name: sanitizeName(p.LegacyMaintainerRef)}
 		}
 		if p.ParentProjectID != nil {
 			if parentName, ok := parentNameByID[*p.ParentProjectID]; ok {

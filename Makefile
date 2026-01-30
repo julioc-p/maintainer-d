@@ -983,6 +983,8 @@ ci-local:
 	@echo "→ Running golangci-lint..."
 	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint not installed. Run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; exit 1; }
 	@golangci-lint run ./...
+	@echo "→ Running go tests..."
+	@go test ./...
 	@echo "→ Running web eslint..."
 	@rm -rf web/work/testdata/next-dist web/testdata/next-dist web/tmp || true
 	@npm --prefix web run lint -- --max-warnings=$(ESLINT_MAX_WARNINGS)

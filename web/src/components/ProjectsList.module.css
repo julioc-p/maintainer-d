@@ -1,0 +1,203 @@
+.card {
+  background: var(--md-card-bg, #ffffff);
+  border-radius: 18px;
+  box-shadow: var(--md-shadow, 0 12px 24px rgba(0, 0, 0, 0.08));
+  padding: 24px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.filterRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.filterLabel {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--md-card-muted, rgba(15, 23, 42, 0.6));
+  font-weight: 600;
+}
+
+.filterChip {
+  border: 1px solid rgba(15, 23, 42, 0.2);
+  background: transparent;
+  color: var(--md-card-text, #0f172a);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.filterChipActive {
+  background: #d62293;
+  color: #fff;
+  border-color: #d62293;
+}
+
+.resultsInline {
+  font-size: 12px;
+  color: var(--md-card-muted, rgba(15, 23, 42, 0.6));
+  margin-left: 6px;
+}
+
+.paginationTop {
+  display: flex;
+  align-items: center;
+}
+
+.paginationTop :global(.pagination) {
+  margin: 0;
+}
+
+.banner {
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: rgba(248, 113, 113, 0.12);
+  color: #b42318;
+  font-size: 14px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: fixed;
+}
+
+.table th {
+  text-align: left;
+  padding: 8px 0;
+  color: var(--md-card-muted, rgba(15, 23, 42, 0.6));
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  font-size: 11px;
+}
+
+.sortButton {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.sortButton:hover {
+  color: #d62293;
+}
+
+.table td {
+  padding: 10px 0;
+  border-top: 1px solid var(--md-border, rgba(15, 23, 42, 0.08));
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.filterRow th {
+  padding: 6px 0 10px;
+  border-top: 1px solid var(--md-border, rgba(15, 23, 42, 0.08));
+}
+
+.filterInput {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.15);
+  padding: 6px 8px;
+  font-size: 12px;
+  background: #fff;
+  color: #111827;
+}
+
+.filterSpacer {
+  color: transparent;
+}
+
+.tableFilterRow th {
+  padding: 6px 0 10px;
+  border-top: 1px solid var(--md-border, rgba(15, 23, 42, 0.08));
+}
+
+.maintainersCol {
+  width: 420px;
+  max-width: 420px;
+  white-space: normal;
+}
+
+.projectNameCol {
+  width: 220px;
+  max-width: 220px;
+  white-space: normal;
+}
+
+.maturityCol {
+  width: 110px;
+}
+
+.addedByCol {
+  width: 140px;
+}
+
+.obIssueCol {
+  width: 90px;
+}
+
+.obStatusCol {
+  width: 110px;
+}
+
+.legacyFileCol {
+  width: 220px;
+}
+
+.orgCol {
+  width: 120px;
+}
+
+.dotRepoCol {
+  width: 220px;
+}
+
+.link {
+  color: #d62293;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.matchHighlight {
+  font-weight: 700;
+  font-size: 14px;
+  color: #fff;
+  background: #d62293;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+.empty {
+  color: var(--md-card-muted, rgba(15, 23, 42, 0.6));
+  font-size: 14px;
+  padding: 12px 0;
+}
+
+.emptyRow {
+  text-align: center;
+  color: var(--md-card-muted, rgba(15, 23, 42, 0.6));
+  font-size: 14px;
+  padding: 16px 0;
+}
