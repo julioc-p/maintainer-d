@@ -19,6 +19,18 @@ WEB_BFF_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web-bff:$(TAG)
 WEB_BFF_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web-bff:latest
 WEB_IMAGE_REPO ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web
 WEB_BFF_IMAGE_REPO ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web-bff
+
+# Docker buildkit progress (docker-only). Example: BUILD_PROGRESS=plain
+BUILD_PROGRESS ?= auto
+DOCKER_BUILD_EXTRA ?=
+NPM_CONFIG_LOGLEVEL ?=
+NPM_CONFIG_REGISTRY ?=
+
+ifeq ($(CONTAINER_TOOL),docker)
+BUILD_PROGRESS_FLAG := --progress=$(BUILD_PROGRESS)
+else
+BUILD_PROGRESS_FLAG :=
+endif
 WHOAMI=$(shell whoami)
 CONTAINER_TOOL ?= podman
 
@@ -55,22 +67,22 @@ GHCR_TOKEN ?= $(GITHUB_GHCR_TOKEN)
 .PHONY: mntrd-image-build
 mntrd-image-build:
 	@echo "Building container image: $(IMAGE)"
-	@$(CONTAINER_TOOL) build -t $(IMAGE) -f Dockerfile --target maintainerd .
+	@$(CONTAINER_TOOL) build $(BUILD_PROGRESS_FLAG) $(DOCKER_BUILD_EXTRA) -t $(IMAGE) -f Dockerfile --target maintainerd .
 
 .PHONY: sync-image-build
 sync-image-build:
 	@echo "Building sync image: $(SYNC_IMAGE)"
-	@$(CONTAINER_TOOL) build -t $(SYNC_IMAGE) -f Dockerfile --target sync .
+	@$(CONTAINER_TOOL) build $(BUILD_PROGRESS_FLAG) $(DOCKER_BUILD_EXTRA) -t $(SYNC_IMAGE) -f Dockerfile --target sync .
 
 .PHONY: sanitize-image-build
 sanitize-image-build:
 	@echo "Building sanitize image: $(SANITIZE_IMAGE)"
-	@$(CONTAINER_TOOL) build -t $(SANITIZE_IMAGE) -f Dockerfile --target sanitize .
+	@$(CONTAINER_TOOL) build $(BUILD_PROGRESS_FLAG) $(DOCKER_BUILD_EXTRA) -t $(SANITIZE_IMAGE) -f Dockerfile --target sanitize .
 
 .PHONY: migrate-image-build
 migrate-image-build:
 	@echo "Building migrate image: $(MIGRATE_IMAGE)"
-	@$(CONTAINER_TOOL) build -t $(MIGRATE_IMAGE) -f Dockerfile --target migrate .
+	@$(CONTAINER_TOOL) build $(BUILD_PROGRESS_FLAG) $(DOCKER_BUILD_EXTRA) -t $(MIGRATE_IMAGE) -f Dockerfile --target migrate .
 
 .PHONY: web-image-build
 web-image-build:
@@ -78,13 +90,15 @@ web-image-build:
 	@if [ -z "$(NEXT_PUBLIC_BFF_BASE_URL)" ]; then \
 		echo "NEXT_PUBLIC_BFF_BASE_URL not set; default /api will be used by the web build."; \
 	fi
-	@$(CONTAINER_TOOL) build -t $(WEB_IMAGE) -f Dockerfile.web \
-		$(if $(NEXT_PUBLIC_BFF_BASE_URL),--build-arg NEXT_PUBLIC_BFF_BASE_URL=$(NEXT_PUBLIC_BFF_BASE_URL),) .
+	@$(CONTAINER_TOOL) build $(BUILD_PROGRESS_FLAG) $(DOCKER_BUILD_EXTRA) -t $(WEB_IMAGE) -f Dockerfile.web \
+		$(if $(NEXT_PUBLIC_BFF_BASE_URL),--build-arg NEXT_PUBLIC_BFF_BASE_URL=$(NEXT_PUBLIC_BFF_BASE_URL),) \
+		$(if $(NPM_CONFIG_LOGLEVEL),--build-arg NPM_CONFIG_LOGLEVEL=$(NPM_CONFIG_LOGLEVEL),) \
+		$(if $(NPM_CONFIG_REGISTRY),--build-arg NPM_CONFIG_REGISTRY=$(NPM_CONFIG_REGISTRY),) .
 
 .PHONY: web-bff-image-build
 web-bff-image-build:
 	@echo "Building web-bff image: $(WEB_BFF_IMAGE)"
-	@$(CONTAINER_TOOL) build -t $(WEB_BFF_IMAGE) -f Dockerfile.web-bff .
+	@$(CONTAINER_TOOL) build $(BUILD_PROGRESS_FLAG) $(DOCKER_BUILD_EXTRA) -t $(WEB_BFF_IMAGE) -f Dockerfile.web-bff .
 
 .PHONY: mntrd-image-push
 mntrd-image-push: mntrd-image-build
@@ -820,6 +834,104 @@ images-show:
 	@echo "  maintainerd-migrate  $(MIGRATE_IMAGE)"
 	@echo "  maintainerd-web      $(WEB_IMAGE)"
 	@echo "  maintainerd-web-bff  $(WEB_BFF_IMAGE)"
+
+.PHONY: images-build
+images-build: mntrd-image-build sync-image-build sanitize-image-build migrate-image-build web-image-build web-bff-image-build
+	@echo "All images built."
+
+.PHONY: mntrd-image-push-only
+mntrd-image-push-only:
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@if [ -n "$(GHCR_TOKEN)" ]; then \
+		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+	else \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
+	fi
+	@echo "Pushing image: $(IMAGE)"
+	@$(CONTAINER_TOOL) push $(IMAGE)
+	@echo "Tagging and pushing latest: $(IMAGE_LATEST)"
+	@$(CONTAINER_TOOL) tag $(IMAGE) $(IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(IMAGE_LATEST)
+
+.PHONY: sync-image-push-only
+sync-image-push-only:
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@if [ -n "$(GHCR_TOKEN)" ]; then \
+		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+	else \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
+	fi
+	@echo "Pushing image: $(SYNC_IMAGE)"
+	@$(CONTAINER_TOOL) push $(SYNC_IMAGE)
+	@echo "Tagging and pushing latest: $(SYNC_IMAGE_LATEST)"
+	@$(CONTAINER_TOOL) tag $(SYNC_IMAGE) $(SYNC_IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(SYNC_IMAGE_LATEST)
+
+.PHONY: sanitize-image-push-only
+sanitize-image-push-only:
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@if [ -n "$(GHCR_TOKEN)" ]; then \
+		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+	else \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
+	fi
+	@echo "Pushing image: $(SANITIZE_IMAGE)"
+	@$(CONTAINER_TOOL) push $(SANITIZE_IMAGE)
+	@echo "Tagging and pushing latest: $(SANITIZE_IMAGE_LATEST)"
+	@$(CONTAINER_TOOL) tag $(SANITIZE_IMAGE) $(SANITIZE_IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(SANITIZE_IMAGE_LATEST)
+
+.PHONY: migrate-image-push-only
+migrate-image-push-only:
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@if [ -n "$(GHCR_TOKEN)" ]; then \
+		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+	else \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
+	fi
+	@echo "Pushing image: $(MIGRATE_IMAGE)"
+	@$(CONTAINER_TOOL) push $(MIGRATE_IMAGE)
+	@echo "Tagging and pushing latest: $(MIGRATE_IMAGE_LATEST)"
+	@$(CONTAINER_TOOL) tag $(MIGRATE_IMAGE) $(MIGRATE_IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(MIGRATE_IMAGE_LATEST)
+
+.PHONY: web-image-push-only
+web-image-push-only:
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@if [ -n "$(GHCR_TOKEN)" ]; then \
+		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+	else \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
+	fi
+	@echo "Pushing image: $(WEB_IMAGE)"
+	@$(CONTAINER_TOOL) push $(WEB_IMAGE)
+	@echo "Tagging and pushing latest: $(WEB_IMAGE_LATEST)"
+	@$(CONTAINER_TOOL) tag $(WEB_IMAGE) $(WEB_IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(WEB_IMAGE_LATEST)
+
+.PHONY: web-bff-image-push-only
+web-bff-image-push-only:
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@if [ -n "$(GHCR_TOKEN)" ]; then \
+		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+	else \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
+	fi
+	@echo "Pushing image: $(WEB_BFF_IMAGE)"
+	@$(CONTAINER_TOOL) push $(WEB_BFF_IMAGE)
+	@echo "Tagging and pushing latest: $(WEB_BFF_IMAGE_LATEST)"
+	@$(CONTAINER_TOOL) tag $(WEB_BFF_IMAGE) $(WEB_BFF_IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(WEB_BFF_IMAGE_LATEST)
+
+.PHONY: images-push
+images-push: mntrd-image-push-only sync-image-push-only sanitize-image-push-only migrate-image-push-only web-image-push-only web-bff-image-push-only
+	@echo "All images pushed (no build)."
 
 .PHONY: clean-env
 clean-env:
