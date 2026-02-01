@@ -938,6 +938,11 @@ clean-env:
 	@rm -f $(ENVOUT)
 	@echo "Removed $(ENVOUT)"
 
+.PHONY: githooks-install
+githooks-install:
+	@git config core.hooksPath .githooks
+	@echo "Configured git hooks path to .githooks"
+
 # ---- Cluster helpers ----
 .PHONY: ensure-ns
 ensure-ns:
