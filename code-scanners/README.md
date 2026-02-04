@@ -1,8 +1,10 @@
 # code-scanners
-// TODO(user): Add simple overview of use/purpose
+
+Kubernetes operator for managing code scanner integrations (FOSSA, Snyk) for CNCF projects.
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+
+The code-scanners operator automates the lifecycle of code scanning tools by managing team creation, user invitations, and access control via Custom Resource Definitions (CRDs). It creates ConfigMaps with scanner metadata for consumption by other systems and maintains automatic team membership synchronization
 
 ## Getting Started
 
@@ -16,7 +18,9 @@
 **Build and push your image to the location specified by `IMG`:**
 
 ```sh
-make docker-build docker-push IMG=<some-registry>/code-scanners:tag
+export IMG=wbkubermatic/code-scanners:0.0.1
+
+make docker-build docker-push IMG=$IMG
 ```
 
 **NOTE:** This image ought to be published in the personal registry you specified.
@@ -37,6 +41,99 @@ make deploy IMG=<some-registry>/code-scanners:tag
 
 > **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
 privileges or be logged in as admin.
+
+### Configure FOSSA Credentials
+
+Before creating `CodeScannerFossa` resources, you need to create a secret with your FOSSA credentials in the same namespace:
+
+```sh
+kubectl create secret generic code-scanners \
+  -n code-scanners \
+  --from-literal=fossa-api-token='YOUR_FOSSA_API_TOKEN' \
+  --from-literal=fossa-organization-id='YOUR_FOSSA_ORG_ID'
+```
+
+Or apply a YAML manifest:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: code-scanners
+  namespace: code-scanners
+type: Opaque
+stringData:
+  fossa-api-token: "YOUR_FOSSA_API_TOKEN"
+  fossa-organization-id: "YOUR_FOSSA_ORG_ID"
+```
+
+**Required keys:**
+- `fossa-api-token` - Your FOSSA Full API Token
+- `fossa-organization-id` - Your FOSSA organization ID
+
+## FOSSA Workflow
+
+The `CodeScannerFossa` controller automates FOSSA team creation and user management.
+
+### Reconciliation Flow
+
+```yaml
+apiVersion: maintainer-d.cncf.io/v1alpha1
+kind: CodeScannerFossa
+metadata:
+  name: my-project
+  namespace: code-scanners
+spec:
+  projectName: my-project           # Creates/fetches FOSSA team
+  fossaUserEmails:                  # Optional: invite users
+    - alice@example.com
+    - bob@example.com
+```
+
+**Automatic behavior:**
+1. **Team creation**: Creates FOSSA team matching `projectName` (idempotent)
+2. **User invitations**: Sends email invitations to FOSSA organization
+3. **Team membership**: Adds users to team once they accept (automatic)
+4. **ConfigMap**: Creates ConfigMap with team metadata for consumption
+
+### Status Tracking
+
+```yaml
+status:
+  fossaTeam:
+    id: 456
+    name: my-project
+    url: https://app.fossa.com/account/settings/organization/teams/456
+  userInvitations:
+    - email: alice@example.com
+      status: AddedToTeam              # Pending → Accepted → AddedToTeam
+      invitedAt: "2026-02-01T10:00:00Z"
+      acceptedAt: "2026-02-02T14:30:00Z"
+      addedToTeamAt: "2026-02-02T14:35:00Z"
+    - email: bob@example.com
+      status: Pending                  # Awaiting user acceptance
+      invitedAt: "2026-02-04T09:00:00Z"
+```
+
+**Invitation states:**
+- `Pending` → User invited, awaiting acceptance (48h TTL)
+- `Accepted` → User accepted, pending team addition
+- `AddedToTeam` → User is team member (stable state)
+- `AlreadyMember` → User was already org member
+- `Failed` → Invitation/team addition failed
+- `Expired` → Invitation expired, will be resent
+
+**Requeue behavior:**
+- Pending invitations: Reconciles every 1 hour
+- Stable state (all users on team): No requeue
+
+### Edge Cases Handled
+
+- **Idempotency**: Safe to apply CR multiple times
+- **Race conditions**: Handles concurrent user additions via `ErrUserAlreadyMember`
+- **Manual changes**: Re-adds users if removed from team outside controller
+- **Expired invitations**: Automatically resends after 48h
+- **Case-insensitive emails**: Handles email case variations
 
 **Create instances of your solution**
 You can apply the samples (examples) from the config/sample:

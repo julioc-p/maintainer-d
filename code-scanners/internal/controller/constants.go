@@ -16,6 +16,8 @@ limitations under the License.
 
 package controller
 
+import "time"
+
 const (
 	// AnnotationConfigMapRef is the annotation key for ConfigMap reference
 	AnnotationConfigMapRef = "maintainer-d.cncf.io/configmap-ref"
@@ -31,4 +33,41 @@ const (
 
 	// ScannerTypeSnyk identifies the Snyk scanner
 	ScannerTypeSnyk = "Snyk"
+
+	// SecretName is the name of the secret containing scanner credentials
+	SecretName = "code-scanners"
+
+	// SecretKeyFossaToken is the key for FOSSA API token
+	SecretKeyFossaToken = "fossa-api-token"
+
+	// SecretKeyFossaOrgID is the key for FOSSA organization ID
+	SecretKeyFossaOrgID = "fossa-organization-id"
+
+	// Condition types
+	ConditionTypeFossaTeamReady  = "FossaTeamReady"
+	ConditionTypeConfigMapReady  = "ConfigMapReady"
+	ConditionTypeUserInvitations = "UserInvitationsProcessed"
+
+	// Condition reasons
+	ReasonTeamCreated             = "TeamCreated"
+	ReasonTeamExists              = "TeamExists"
+	ReasonFossaAPIError           = "APIError"
+	ReasonCredentialsNotFound     = "CredentialsNotFound"
+	ReasonConfigMapCreated        = "ConfigMapCreated"
+	ReasonInvitationsSent         = "InvitationsSent"
+	ReasonInvitationsPartial      = "InvitationsPartiallyProcessed"
+	ReasonInvitationsFailed       = "InvitationsFailed"
+	ReasonNoInvitations           = "NoInvitationsRequested"
+	ReasonTeamMembershipProcessed = "TeamMembershipProcessed"
+
+	// User invitation statuses
+	InvitationStatusPending       = "Pending"
+	InvitationStatusAccepted      = "Accepted"
+	InvitationStatusAddedToTeam   = "AddedToTeam"
+	InvitationStatusAlreadyMember = "AlreadyMember"
+	InvitationStatusFailed        = "Failed"
+	InvitationStatusExpired       = "Expired"
+
+	// InvitationTTL is the lifetime of a FOSSA invitation (48 hours per FOSSA API docs)
+	InvitationTTL = 48 * time.Hour
 )

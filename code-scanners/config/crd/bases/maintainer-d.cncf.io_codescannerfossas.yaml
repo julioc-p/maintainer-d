@@ -18,8 +18,14 @@ spec:
     - jsonPath: .spec.projectName
       name: Project
       type: string
+    - jsonPath: .status.fossaTeam.id
+      name: FossaTeamID
+      type: integer
     - jsonPath: .status.configMapRef
       name: ConfigMap
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="FossaTeamReady")].status
+      name: Ready
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -53,6 +59,12 @@ spec:
                 description: ConfigMapName is the name of the ConfigMap to create
                   for this scanner
                 type: string
+              fossaUserEmails:
+                description: FossaUserEmails is a list of email addresses to invite
+                  to FOSSA
+                items:
+                  type: string
+                type: array
               projectName:
                 description: ProjectName is the name of the CNCF project to scan
                 minLength: 1
@@ -128,6 +140,69 @@ spec:
                 description: ConfigMapRef is the namespace/name reference to the created
                   ConfigMap
                 type: string
+              fossaTeam:
+                description: FossaTeam contains details about the created FOSSA Team
+                properties:
+                  createdAt:
+                    description: CreatedAt is when the team was created in FOSSA
+                    format: date-time
+                    type: string
+                  id:
+                    description: ID is the FOSSA team ID
+                    type: integer
+                  name:
+                    description: Name is the team name (matches projectName)
+                    type: string
+                  organizationId:
+                    description: OrganizationID is the FOSSA organization ID
+                    type: integer
+                  url:
+                    description: URL is a link to the team in FOSSA UI
+                    type: string
+                required:
+                - id
+                - name
+                - organizationId
+                type: object
+              observedGeneration:
+                description: ObservedGeneration is the generation observed by the
+                  controller
+                format: int64
+                type: integer
+              userInvitations:
+                description: UserInvitations tracks the status of user invitations
+                items:
+                  description: FossaUserInvitation tracks the invitation status for
+                    a user
+                  properties:
+                    acceptedAt:
+                      description: AcceptedAt is when the user accepted the invitation
+                      format: date-time
+                      type: string
+                    addedToTeamAt:
+                      description: AddedToTeamAt is when the user was added to the
+                        FOSSA team
+                      format: date-time
+                      type: string
+                    email:
+                      description: Email is the user's email address
+                      type: string
+                    invitedAt:
+                      description: InvitedAt is when the invitation was sent
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message provides additional context about the status
+                      type: string
+                    status:
+                      description: Status is the current invitation status (Pending,
+                        Accepted, AddedToTeam, AlreadyMember, Failed, Expired)
+                      type: string
+                  required:
+                  - email
+                  - status
+                  type: object
+                type: array
             type: object
         required:
         - spec
