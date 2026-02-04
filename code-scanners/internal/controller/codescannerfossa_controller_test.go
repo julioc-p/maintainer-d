@@ -48,9 +48,9 @@ type mockFossaClient struct {
 	pendingInvitationErr error
 
 	// Team membership fields
-	teamMembers          map[int][]string // teamID -> []email
-	addToTeamErr         error
-	fetchTeamMembersErr  error
+	teamMembers         map[int][]string // teamID -> []email
+	addToTeamErr        error
+	fetchTeamMembersErr error
 }
 
 func newMockFossaClient() *mockFossaClient {
@@ -1198,10 +1198,10 @@ func TestEnsureTeamMembership_FetchTeamMembersError(t *testing.T) {
 func containsString(haystack, needle string) bool {
 	return len(haystack) > 0 && len(needle) > 0 &&
 		(haystack == needle ||
-		 (len(haystack) > len(needle) &&
-		  (haystack[:len(needle)] == needle ||
-		   haystack[len(haystack)-len(needle):] == needle ||
-		   containsSubstring(haystack, needle))))
+			(len(haystack) > len(needle) &&
+				(haystack[:len(needle)] == needle ||
+					haystack[len(haystack)-len(needle):] == needle ||
+					containsSubstring(haystack, needle))))
 }
 
 func containsSubstring(s, substr string) bool {

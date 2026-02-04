@@ -49,24 +49,24 @@ const (
 	ConditionTypeUserInvitations = "UserInvitationsProcessed"
 
 	// Condition reasons
-	ReasonTeamCreated              = "TeamCreated"
-	ReasonTeamExists               = "TeamExists"
-	ReasonFossaAPIError            = "APIError"
-	ReasonCredentialsNotFound      = "CredentialsNotFound"
-	ReasonConfigMapCreated         = "ConfigMapCreated"
-	ReasonInvitationsSent          = "InvitationsSent"
-	ReasonInvitationsPartial       = "InvitationsPartiallyProcessed"
-	ReasonInvitationsFailed        = "InvitationsFailed"
-	ReasonNoInvitations            = "NoInvitationsRequested"
-	ReasonTeamMembershipProcessed  = "TeamMembershipProcessed"
+	ReasonTeamCreated             = "TeamCreated"
+	ReasonTeamExists              = "TeamExists"
+	ReasonFossaAPIError           = "APIError"
+	ReasonCredentialsNotFound     = "CredentialsNotFound"
+	ReasonConfigMapCreated        = "ConfigMapCreated"
+	ReasonInvitationsSent         = "InvitationsSent"
+	ReasonInvitationsPartial      = "InvitationsPartiallyProcessed"
+	ReasonInvitationsFailed       = "InvitationsFailed"
+	ReasonNoInvitations           = "NoInvitationsRequested"
+	ReasonTeamMembershipProcessed = "TeamMembershipProcessed"
 
 	// User invitation statuses
-	InvitationStatusPending      = "Pending"
-	InvitationStatusAccepted     = "Accepted"
-	InvitationStatusAddedToTeam  = "AddedToTeam"
+	InvitationStatusPending       = "Pending"
+	InvitationStatusAccepted      = "Accepted"
+	InvitationStatusAddedToTeam   = "AddedToTeam"
 	InvitationStatusAlreadyMember = "AlreadyMember"
-	InvitationStatusFailed       = "Failed"
-	InvitationStatusExpired      = "Expired"
+	InvitationStatusFailed        = "Failed"
+	InvitationStatusExpired       = "Expired"
 
 	// InvitationTTL is the lifetime of a FOSSA invitation (48 hours per FOSSA API docs)
 	InvitationTTL = 48 * time.Hour
