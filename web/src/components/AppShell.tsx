@@ -179,7 +179,7 @@ export default function AppShell({
             params.set("query", navQuery.trim());
           }
           const qs = params.toString();
-          router.push(qs ? `/?${qs}` : "/");
+          router.push(qs ? `/search?${qs}` : "/search");
           if (typeof window !== "undefined") {
             window.dispatchEvent(new Event("md-search"));
           }
