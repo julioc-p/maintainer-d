@@ -76,9 +76,18 @@ func main() {
 		},
 		{
 			Name:             "Renee Sample",
-			Email:            "renee.sample@test.dev",
+			Email:            "renee.sample@example.dev",
 			GitHubAccount:    "renee-sample",
 			GitHubEmail:      "renee@example.dev",
+			MaintainerStatus: model.ActiveMaintainer,
+			CompanyID:        &company.ID,
+			RegisteredAt:     timePtr(time.Now()),
+		},
+		{
+			Name:             "Alex Example",
+			Email:            "alex@example.dev",
+			GitHubAccount:    "alex-example",
+			GitHubEmail:      "alex@example.dev",
 			MaintainerStatus: model.ActiveMaintainer,
 			CompanyID:        &company.ID,
 			RegisteredAt:     timePtr(time.Now()),
@@ -133,19 +142,20 @@ func main() {
 	if err := db.Model(&projects[0]).Association("Maintainers").Replace(
 		&maintainers[0],
 		&maintainers[1],
+		&maintainers[2],
 	); err != nil {
 		log.Fatalf("seed: association failed: %v", err)
 	}
 	if err := db.Model(&projects[1]).Association("Maintainers").Replace(
 		&maintainers[0],
-		&maintainers[2],
+		&maintainers[3],
 	); err != nil {
 		log.Fatalf("seed: association failed: %v", err)
 	}
 	if err := db.Model(&projects[2]).Association("Maintainers").Replace(
 		&maintainers[0],
-		&maintainers[3],
 		&maintainers[4],
+		&maintainers[5],
 	); err != nil {
 		log.Fatalf("seed: association failed: %v", err)
 	}

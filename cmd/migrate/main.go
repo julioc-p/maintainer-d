@@ -62,7 +62,7 @@ func migrate(_ context.Context, store *db.SQLStore) error {
 		return err
 	}
 
-	if store.DB().Dialector.Name() != "postgres" {
+	if store.DB().Name() != "postgres" {
 		return nil
 	}
 

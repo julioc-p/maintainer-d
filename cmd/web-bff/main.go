@@ -2198,20 +2198,21 @@ type companyDetailResponse struct {
 }
 
 type searchProjectResult struct {
-	ID                uint    `json:"id"`
-	Name              string  `json:"name"`
-	GitHubOrg         string  `json:"githubOrg,omitempty"`
-	OnboardingIssue   *string `json:"onboardingIssue,omitempty"`
-	LegacyMaintainerRef string `json:"legacyMaintainerRef,omitempty"`
-	DotProjectYamlRef string  `json:"dotProjectYamlRef,omitempty"`
+	ID                  uint    `json:"id"`
+	Name                string  `json:"name"`
+	GitHubOrg           string  `json:"githubOrg,omitempty"`
+	OnboardingIssue     *string `json:"onboardingIssue,omitempty"`
+	LegacyMaintainerRef string  `json:"legacyMaintainerRef,omitempty"`
+	DotProjectYamlRef   string  `json:"dotProjectYamlRef,omitempty"`
 }
 
 type searchMaintainerResult struct {
-	ID      uint   `json:"id"`
-	Name    string `json:"name"`
-	GitHub  string `json:"github"`
-	Email   string `json:"email,omitempty"`
-	Company string `json:"company,omitempty"`
+	ID       uint                               `json:"id"`
+	Name     string                             `json:"name"`
+	GitHub   string                             `json:"github"`
+	Email    string                             `json:"email,omitempty"`
+	Company  string                             `json:"company,omitempty"`
+	Projects []companyMaintainerProjectResponse `json:"projects,omitempty"`
 }
 
 type searchCompanyResult struct {
@@ -2220,13 +2221,13 @@ type searchCompanyResult struct {
 }
 
 type searchResponse struct {
-	Query       string                 `json:"query"`
-	Projects    []searchProjectResult  `json:"projects"`
-	Maintainers []searchMaintainerResult `json:"maintainers"`
-	Companies   []searchCompanyResult  `json:"companies"`
-	ProjectsTotal    int64 `json:"projectsTotal"`
-	MaintainersTotal int64 `json:"maintainersTotal"`
-	CompaniesTotal   int64 `json:"companiesTotal"`
+	Query            string                   `json:"query"`
+	Projects         []searchProjectResult    `json:"projects"`
+	Maintainers      []searchMaintainerResult `json:"maintainers"`
+	Companies        []searchCompanyResult    `json:"companies"`
+	ProjectsTotal    int64                    `json:"projectsTotal"`
+	MaintainersTotal int64                    `json:"maintainersTotal"`
+	CompaniesTotal   int64                    `json:"companiesTotal"`
 }
 
 type companyMaintainerProjectResponse struct {
@@ -2235,16 +2236,16 @@ type companyMaintainerProjectResponse struct {
 }
 
 type companyMaintainerResponse struct {
-	ID       uint                            `json:"id"`
-	Name     string                          `json:"name"`
-	GitHub   string                          `json:"github"`
-	Email    string                          `json:"email,omitempty"`
+	ID       uint                               `json:"id"`
+	Name     string                             `json:"name"`
+	GitHub   string                             `json:"github"`
+	Email    string                             `json:"email,omitempty"`
 	Projects []companyMaintainerProjectResponse `json:"projects"`
 }
 
 type companyMaintainersResponse struct {
-	ID         uint                        `json:"id"`
-	Name       string                      `json:"name"`
+	ID          uint                        `json:"id"`
+	Name        string                      `json:"name"`
 	Maintainers []companyMaintainerResponse `json:"maintainers"`
 }
 
@@ -2475,7 +2476,7 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	projectsOffset := (projectsPage - 1) * limit
 	maintainersOffset := (maintainersPage - 1) * limit
 	companiesOffset := (companiesPage - 1) * limit
-	if s.store.DB().Dialector.Name() == "postgres" {
+	if s.store.DB().Name() == "postgres" {
 		s.handleSearchPostgres(w, query, limit, projectsOffset, maintainersOffset, companiesOffset)
 		return
 	}
@@ -2514,10 +2515,10 @@ func (s *server) handleSearchPostgres(w http.ResponseWriter, query string, limit
 		projectResults = append(projectResults, searchProjectResult{
 			ID:                  project.ID,
 			Name:                project.Name,
-			GitHubOrg:            strings.TrimSpace(project.GitHubOrg),
-			OnboardingIssue:      project.OnboardingIssue,
-			LegacyMaintainerRef:  strings.TrimSpace(project.LegacyMaintainerRef),
-			DotProjectYamlRef:    strings.TrimSpace(project.DotProjectYamlRef),
+			GitHubOrg:           strings.TrimSpace(project.GitHubOrg),
+			OnboardingIssue:     project.OnboardingIssue,
+			LegacyMaintainerRef: strings.TrimSpace(project.LegacyMaintainerRef),
+			DotProjectYamlRef:   strings.TrimSpace(project.DotProjectYamlRef),
 		})
 	}
 
@@ -2558,7 +2559,9 @@ func (s *server) handleSearchPostgres(w http.ResponseWriter, query string, limit
 		return
 	}
 	maintainerResults := make([]searchMaintainerResult, 0, len(maintainerRows))
+	maintainerIDs := make([]uint, 0, len(maintainerRows))
 	for _, maintainer := range maintainerRows {
+		maintainerIDs = append(maintainerIDs, maintainer.ID)
 		result := searchMaintainerResult{
 			ID:     maintainer.ID,
 			Name:   strings.TrimSpace(maintainer.Name),
@@ -2569,6 +2572,36 @@ func (s *server) handleSearchPostgres(w http.ResponseWriter, query string, limit
 			result.Company = maintainer.CompanyName
 		}
 		maintainerResults = append(maintainerResults, result)
+	}
+
+	if len(maintainerIDs) > 0 {
+		type maintainerProjectRow struct {
+			MaintainerID uint   `gorm:"column:maintainer_id"`
+			ProjectID    uint   `gorm:"column:id"`
+			ProjectName  string `gorm:"column:name"`
+		}
+		var projectRows []maintainerProjectRow
+		if err := s.store.DB().Raw(`
+			SELECT mp.maintainer_id, p.id, p.name
+			FROM maintainer_projects mp
+			JOIN projects p ON p.id = mp.project_id
+			WHERE p.deleted_at IS NULL
+			  AND mp.maintainer_id IN ?
+			ORDER BY p.name`, maintainerIDs).Scan(&projectRows).Error; err != nil {
+			s.logger.Printf("web-bff: search maintainer projects error: %v", err)
+			http.Error(w, "failed to search maintainers", http.StatusInternalServerError)
+			return
+		}
+		projectMap := make(map[uint][]companyMaintainerProjectResponse)
+		for _, row := range projectRows {
+			projectMap[row.MaintainerID] = append(projectMap[row.MaintainerID], companyMaintainerProjectResponse{
+				ID:   row.ProjectID,
+				Name: row.ProjectName,
+			})
+		}
+		for i := range maintainerResults {
+			maintainerResults[i].Projects = projectMap[maintainerResults[i].ID]
+		}
 	}
 
 	var companies []model.Company
@@ -2605,13 +2638,13 @@ func (s *server) handleSearchPostgres(w http.ResponseWriter, query string, limit
 
 	w.Header().Set(headerContentType, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(searchResponse{
-		Query:       query,
-		Projects:    projectResults,
-		Maintainers: maintainerResults,
-		Companies:   companyResults,
-		ProjectsTotal: projectsTotal,
+		Query:            query,
+		Projects:         projectResults,
+		Maintainers:      maintainerResults,
+		Companies:        companyResults,
+		ProjectsTotal:    projectsTotal,
 		MaintainersTotal: maintainersTotal,
-		CompaniesTotal: companiesTotal,
+		CompaniesTotal:   companiesTotal,
 	}); err != nil {
 		s.logger.Printf("web-bff: handleSearch encode error: %v", err)
 	}
@@ -2623,7 +2656,7 @@ func (s *server) handleSearchFallback(w http.ResponseWriter, query string, limit
 	var projectsTotal int64
 	var projects []model.Project
 	if err := s.store.DB().
-		Select("id, name, git_hub_org, onboarding_issue, maintainer_ref, dot_project_yaml_ref").
+		Model(&model.Project{}).
 		Where(
 			"LOWER(name) LIKE ? OR LOWER(maintainer_ref) LIKE ? OR LOWER(dot_project_yaml_ref) LIKE ? OR LOWER(git_hub_org) LIKE ?",
 			like,
@@ -2637,6 +2670,7 @@ func (s *server) handleSearchFallback(w http.ResponseWriter, query string, limit
 		return
 	}
 	if err := s.store.DB().
+		Model(&model.Project{}).
 		Select("id, name, git_hub_org, onboarding_issue, maintainer_ref, dot_project_yaml_ref").
 		Where(
 			"LOWER(name) LIKE ? OR LOWER(maintainer_ref) LIKE ? OR LOWER(dot_project_yaml_ref) LIKE ? OR LOWER(git_hub_org) LIKE ?",
@@ -2659,17 +2693,17 @@ func (s *server) handleSearchFallback(w http.ResponseWriter, query string, limit
 		projectResults = append(projectResults, searchProjectResult{
 			ID:                  project.ID,
 			Name:                project.Name,
-			GitHubOrg:            strings.TrimSpace(project.GitHubOrg),
-			OnboardingIssue:      project.OnboardingIssue,
-			LegacyMaintainerRef:  strings.TrimSpace(project.LegacyMaintainerRef),
-			DotProjectYamlRef:    strings.TrimSpace(project.DotProjectYamlRef),
+			GitHubOrg:           strings.TrimSpace(project.GitHubOrg),
+			OnboardingIssue:     project.OnboardingIssue,
+			LegacyMaintainerRef: strings.TrimSpace(project.LegacyMaintainerRef),
+			DotProjectYamlRef:   strings.TrimSpace(project.DotProjectYamlRef),
 		})
 	}
 
 	var maintainers []model.Maintainer
 	var maintainersTotal int64
 	if err := s.store.DB().
-		Preload("Company").
+		Model(&model.Maintainer{}).
 		Where(
 			"LOWER(name) LIKE ? OR LOWER(email) LIKE ? OR LOWER(git_hub_account) LIKE ?",
 			like,
@@ -2683,6 +2717,7 @@ func (s *server) handleSearchFallback(w http.ResponseWriter, query string, limit
 	}
 	if err := s.store.DB().
 		Preload("Company").
+		Preload("Projects").
 		Where(
 			"LOWER(name) LIKE ? OR LOWER(email) LIKE ? OR LOWER(git_hub_account) LIKE ?",
 			like,
@@ -2708,12 +2743,23 @@ func (s *server) handleSearchFallback(w http.ResponseWriter, query string, limit
 		if maintainer.Company.Name != "" {
 			result.Company = maintainer.Company.Name
 		}
+		if len(maintainer.Projects) > 0 {
+			projects := make([]companyMaintainerProjectResponse, 0, len(maintainer.Projects))
+			for _, project := range maintainer.Projects {
+				projects = append(projects, companyMaintainerProjectResponse{
+					ID:   project.ID,
+					Name: project.Name,
+				})
+			}
+			result.Projects = projects
+		}
 		maintainerResults = append(maintainerResults, result)
 	}
 
 	var companies []model.Company
 	var companiesTotal int64
 	if err := s.store.DB().
+		Model(&model.Company{}).
 		Where("LOWER(name) LIKE ?", like).
 		Count(&companiesTotal).Error; err != nil {
 		s.logger.Printf("web-bff: search companies total error: %v", err)
@@ -2740,13 +2786,13 @@ func (s *server) handleSearchFallback(w http.ResponseWriter, query string, limit
 
 	w.Header().Set(headerContentType, contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(searchResponse{
-		Query:       query,
-		Projects:    projectResults,
-		Maintainers: maintainerResults,
-		Companies:   companyResults,
-		ProjectsTotal: projectsTotal,
+		Query:            query,
+		Projects:         projectResults,
+		Maintainers:      maintainerResults,
+		Companies:        companyResults,
+		ProjectsTotal:    projectsTotal,
 		MaintainersTotal: maintainersTotal,
-		CompaniesTotal: companiesTotal,
+		CompaniesTotal:   companiesTotal,
 	}); err != nil {
 		s.logger.Printf("web-bff: handleSearch encode error: %v", err)
 	}

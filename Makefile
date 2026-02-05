@@ -442,15 +442,15 @@ test-web:
 			echo "test-web failed; grepping logs from $$TESTDATA_DIR"; \
 			if [ -f "$$TESTDATA_DIR/web-bff-test.log" ]; then \
 				echo "--- web-bff-test.log (errors) ---"; \
-				{ rg -n "(error|failed|panic)" "$$TESTDATA_DIR/web-bff-test.log" || true; } ; \
+				{ grep -nE "(error|failed|panic)" "$$TESTDATA_DIR/web-bff-test.log" || true; } ; \
 			fi; \
 			if [ -f "$$TESTDATA_DIR/web-app-test.log" ]; then \
 				echo "--- web-app-test.log (errors) ---"; \
-				{ rg -n "(error|failed|panic)" "$$TESTDATA_DIR/web-app-test.log" || true; } ; \
+				{ grep -nE "(error|failed|panic)" "$$TESTDATA_DIR/web-app-test.log" || true; } ; \
 			fi; \
 			if [ -f "$$TESTDATA_DIR/web-build-test.log" ]; then \
 				echo "--- web-build-test.log (errors) ---"; \
-				{ rg -n "(error|failed|panic)" "$$TESTDATA_DIR/web-build-test.log" || true; } ; \
+				{ grep -nE "(error|failed|panic)" "$$TESTDATA_DIR/web-build-test.log" || true; } ; \
 			fi; \
 		fi; \
 		exit $$status; \
@@ -598,7 +598,7 @@ sops-apply-web-secrets:
 	fi; \
 	if [ -n "$(SOPS_EXPECTED_AGE)" ]; then \
 		for file in deploy/secrets/maintainerd-web-env.yaml deploy/secrets/maintainerd-web-bff-env.yaml deploy/secrets/maintainerd-db-env.yaml deploy/secrets/maintainerd-server-env.yaml; do \
-			if ! rg -q "recipient: $(SOPS_EXPECTED_AGE)" "$$file"; then \
+			if ! grep -q "recipient: $(SOPS_EXPECTED_AGE)" "$$file"; then \
 				echo "Encrypted recipients for $$file do not include expected key $(SOPS_EXPECTED_AGE)."; \
 				echo "Re-encrypt with: make sops-encrypt-web-secrets SOPS_AGE_KEY=$(SOPS_EXPECTED_AGE)"; \
 				exit 1; \
