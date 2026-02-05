@@ -151,3 +151,39 @@ func TestGetMaintainersByProject(t *testing.T) {
 func TestGetProjectsUsingService(t *testing.T) {
 	t.Skip("testDB not defined - needs implementation")
 }
+
+func TestUpsertMaintainer_FillsMissingFields(t *testing.T) {
+	db := setupTestDB(t)
+	store := NewSQLStore(db)
+
+	project := model.Project{Name: "cedar", Maturity: model.Sandbox}
+	require.NoError(t, db.Create(&project).Error)
+
+	// Existing maintainer with missing name and GitHub account.
+	existing := model.Maintainer{
+		Name:             "",
+		Email:            "accorell@amazon.com",
+		GitHubAccount:    "GITHUB_MISSING",
+		MaintainerStatus: model.ActiveMaintainer,
+	}
+	require.NoError(t, db.Create(&existing).Error)
+
+	maintainer, err := store.UpsertMaintainer(project.ID, "Adrian Palacios", "accorell@amazon.com", "adpaco-aws", "Amazon")
+	require.NoError(t, err)
+	require.NotNil(t, maintainer)
+	assert.Equal(t, existing.ID, maintainer.ID)
+
+	var refreshed model.Maintainer
+	require.NoError(t, db.First(&refreshed, existing.ID).Error)
+	assert.Equal(t, "Adrian Palacios", refreshed.Name)
+	assert.Equal(t, "adpaco-aws", refreshed.GitHubAccount)
+	assert.Equal(t, "accorell@amazon.com", refreshed.Email)
+	assert.NotNil(t, refreshed.CompanyID)
+	assert.NotEqual(t, uint(0), *refreshed.CompanyID)
+
+	var count int64
+	require.NoError(t, db.Model(&model.MaintainerProject{}).
+		Where("maintainer_id = ? AND project_id = ?", existing.ID, project.ID).
+		Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+}

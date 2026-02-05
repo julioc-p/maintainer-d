@@ -74,6 +74,7 @@ func setupPostgresTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, lastErr)
 
 	err = gormDB.AutoMigrate(
+		&model.AuditLog{},
 		&model.Company{},
 		&model.Foundation{},
 		&model.Project{},
@@ -447,4 +448,65 @@ func TestHandleOnboardingIssues(t *testing.T) {
 	require.Len(t, response.Issues, 1)
 	assert.Equal(t, 101, response.Issues[0].Number)
 	assert.Equal(t, "Sample", response.Issues[0].ProjectName)
+}
+
+func TestHandleMaintainerFromRef_AuditLog(t *testing.T) {
+	dbConn := setupPostgresTestDB(t)
+	store := db.NewSQLStore(dbConn)
+	now := time.Now()
+
+	staff := model.StaffMember{
+		Name:          "Staff Tester",
+		GitHubAccount: "staff-tester",
+		Email:         "staff@example.org",
+	}
+	require.NoError(t, dbConn.Create(&staff).Error)
+
+	project := model.Project{Name: "Cedar", Maturity: model.Sandbox}
+	require.NoError(t, dbConn.Create(&project).Error)
+
+	existing := model.Maintainer{
+		Name:             "",
+		Email:            "sam.quill@example.invalid",
+		GitHubAccount:    "GITHUB_MISSING",
+		MaintainerStatus: model.ActiveMaintainer,
+	}
+	require.NoError(t, dbConn.Create(&existing).Error)
+
+	s := &server{
+		store:      store,
+		sessions:   newSessionStore(log.New(io.Discard, "", 0)),
+		cookieName: defaultSessionCookieName,
+		logger:     log.New(io.Discard, "", 0),
+	}
+
+	staffSessionID := "staff-session"
+	s.sessions.Set(session{
+		ID:        staffSessionID,
+		Login:     staff.GitHubAccount,
+		Role:      roleStaff,
+		CreatedAt: now,
+		ExpiresAt: now.Add(time.Hour),
+	})
+
+	body := `{"projectId":` + fmt.Sprintf("%d", project.ID) + `,"name":"Sam Quill","githubHandle":"samquill","email":"sam.quill@example.invalid","company":"Acme Co"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/maintainers/from-ref", strings.NewReader(body))
+	req.AddCookie(&http.Cookie{Name: s.cookieName, Value: staffSessionID})
+	rec := httptest.NewRecorder()
+	handler := s.requireSession(http.HandlerFunc(s.handleMaintainerFromRef))
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var audit model.AuditLog
+	err := dbConn.Where("maintainer_id = ? AND project_id = ? AND action = ?", existing.ID, project.ID, "MAINTAINER_UPDATE").First(&audit).Error
+	require.NoError(t, err)
+
+	var metadata map[string]any
+	require.NoError(t, json.Unmarshal([]byte(audit.Metadata), &metadata))
+	changes, ok := metadata["changes"].(map[string]any)
+	require.True(t, ok)
+	assert.Contains(t, changes, "name")
+	assert.Contains(t, changes, "github")
+	assert.Contains(t, changes, "company")
 }

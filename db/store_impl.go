@@ -105,7 +105,7 @@ func (s *SQLStore) UpdateProjectMaturity(projectID uint, maturity model.Maturity
 	return nil
 }
 
-func (s *SQLStore) CreateMaintainer(projectID uint, name, email, githubHandle, company string) (*model.Maintainer, error) {
+func (s *SQLStore) UpsertMaintainer(projectID uint, name, email, githubHandle, company string) (*model.Maintainer, error) {
 	tx := s.db.Begin()
 	if tx.Error != nil {
 		return nil, tx.Error
@@ -167,13 +167,6 @@ func (s *SQLStore) CreateMaintainer(projectID uint, name, email, githubHandle, c
 			tx.Rollback()
 			return nil, err
 		}
-	} else if companyModel != nil && maintainer.CompanyID == nil {
-		maintainer.CompanyID = &companyModel.ID
-		maintainer.Company = *companyModel
-		if err := tx.Save(&maintainer).Error; err != nil {
-			tx.Rollback()
-			return nil, err
-		}
 	}
 
 	if err := tx.Model(&maintainer).Association("Projects").Append(&project); err != nil {
@@ -184,7 +177,36 @@ func (s *SQLStore) CreateMaintainer(projectID uint, name, email, githubHandle, c
 	if err := tx.Commit().Error; err != nil {
 		return nil, err
 	}
-	return &maintainer, nil
+
+	finalName := maintainer.Name
+	if strings.TrimSpace(finalName) == "" && strings.TrimSpace(name) != "" {
+		finalName = name
+	}
+	finalGitHub := maintainer.GitHubAccount
+	if finalGitHub == "" || finalGitHub == "GITHUB_MISSING" {
+		if strings.TrimSpace(githubHandle) != "" {
+			finalGitHub = githubHandle
+		}
+	}
+	finalEmail := maintainer.Email
+	if finalEmail == "" || finalEmail == "EMAIL_MISSING" {
+		if strings.TrimSpace(email) != "" {
+			finalEmail = email
+		}
+	}
+	finalCompanyID := maintainer.CompanyID
+	if finalCompanyID == nil && companyModel != nil {
+		finalCompanyID = &companyModel.ID
+	}
+	status := maintainer.MaintainerStatus
+	if !status.IsValid() {
+		status = model.ActiveMaintainer
+	}
+	updatedMaintainer, err := s.UpdateMaintainerDetails(maintainer.ID, finalName, finalEmail, finalGitHub, status, finalCompanyID)
+	if err != nil {
+		return nil, err
+	}
+	return updatedMaintainer, nil
 }
 
 func normalizeOrSentinel(value, sentinel string) string {
