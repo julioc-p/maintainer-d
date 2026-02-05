@@ -2224,6 +2224,9 @@ type searchResponse struct {
 	Projects    []searchProjectResult  `json:"projects"`
 	Maintainers []searchMaintainerResult `json:"maintainers"`
 	Companies   []searchCompanyResult  `json:"companies"`
+	ProjectsTotal    int64 `json:"projectsTotal"`
+	MaintainersTotal int64 `json:"maintainersTotal"`
+	CompaniesTotal   int64 `json:"companiesTotal"`
 }
 
 type companyMaintainerProjectResponse struct {
@@ -2465,24 +2468,42 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "query is required", http.StatusBadRequest)
 		return
 	}
-	limit := parseIntParam(r, "limit", 20, 1, 100)
+	limit := 20
+	projectsPage := parseIntParam(r, "projectsPage", 1, 1, 1000)
+	maintainersPage := parseIntParam(r, "maintainersPage", 1, 1, 1000)
+	companiesPage := parseIntParam(r, "companiesPage", 1, 1, 1000)
+	projectsOffset := (projectsPage - 1) * limit
+	maintainersOffset := (maintainersPage - 1) * limit
+	companiesOffset := (companiesPage - 1) * limit
 	if s.store.DB().Dialector.Name() == "postgres" {
-		s.handleSearchPostgres(w, query, limit)
+		s.handleSearchPostgres(w, query, limit, projectsOffset, maintainersOffset, companiesOffset)
 		return
 	}
-	s.handleSearchFallback(w, query, limit)
+	s.handleSearchFallback(w, query, limit, projectsOffset, maintainersOffset, companiesOffset)
 }
 
-func (s *server) handleSearchPostgres(w http.ResponseWriter, query string, limit int) {
+func (s *server) handleSearchPostgres(w http.ResponseWriter, query string, limit int, projectsOffset int, maintainersOffset int, companiesOffset int) {
 	like := "%" + query + "%"
+
+	var projectsTotal int64
+	if err := s.store.DB().Raw(`
+		SELECT COUNT(*)
+		FROM projects
+		WHERE deleted_at IS NULL
+		  AND search_tsv @@ websearch_to_tsquery('simple', unaccent(?))`, query).Scan(&projectsTotal).Error; err != nil {
+		s.logger.Printf("web-bff: search projects total error: %v", err)
+		http.Error(w, "failed to search projects", http.StatusInternalServerError)
+		return
+	}
 
 	var projects []model.Project
 	if err := s.store.DB().Raw(`
 		SELECT id, name, git_hub_org, onboarding_issue, maintainer_ref, dot_project_yaml_ref
 		FROM projects
-		WHERE search_tsv @@ websearch_to_tsquery('simple', unaccent(?))
+		WHERE deleted_at IS NULL
+		  AND search_tsv @@ websearch_to_tsquery('simple', unaccent(?))
 		ORDER BY ts_rank_cd(search_tsv, websearch_to_tsquery('simple', unaccent(?))) DESC, name
-		LIMIT ?`, query, query, limit).Scan(&projects).Error; err != nil {
+		LIMIT ? OFFSET ?`, query, query, limit, projectsOffset).Scan(&projects).Error; err != nil {
 		s.logger.Printf("web-bff: search projects error: %v", err)
 		http.Error(w, "failed to search projects", http.StatusInternalServerError)
 		return
@@ -2508,16 +2529,30 @@ func (s *server) handleSearchPostgres(w http.ResponseWriter, query string, limit
 		CompanyName   string `gorm:"column:company_name"`
 	}
 	var maintainerRows []maintainerSearchRow
+	var maintainersTotal int64
+	if err := s.store.DB().Raw(`
+		SELECT COUNT(*)
+		FROM maintainers m
+		WHERE m.deleted_at IS NULL
+		  AND (m.search_tsv @@ websearch_to_tsquery('simple', unaccent(?))
+		   OR unaccent(m.name) ILIKE unaccent(?)
+		   OR unaccent(m.email) ILIKE unaccent(?)
+		   OR unaccent(m.git_hub_account) ILIKE unaccent(?))`, query, like, like, like).Scan(&maintainersTotal).Error; err != nil {
+		s.logger.Printf("web-bff: search maintainers total error: %v", err)
+		http.Error(w, "failed to search maintainers", http.StatusInternalServerError)
+		return
+	}
 	if err := s.store.DB().Raw(`
 		SELECT m.id, m.name, m.email, m.git_hub_account, c.name AS company_name
 		FROM maintainers m
 		LEFT JOIN companies c ON c.id = m.company_id
-		WHERE m.search_tsv @@ websearch_to_tsquery('simple', unaccent(?))
+		WHERE m.deleted_at IS NULL
+		  AND (m.search_tsv @@ websearch_to_tsquery('simple', unaccent(?))
 		   OR unaccent(m.name) ILIKE unaccent(?)
 		   OR unaccent(m.email) ILIKE unaccent(?)
-		   OR unaccent(m.git_hub_account) ILIKE unaccent(?)
+		   OR unaccent(m.git_hub_account) ILIKE unaccent(?))
 		ORDER BY ts_rank_cd(m.search_tsv, websearch_to_tsquery('simple', unaccent(?))) DESC, m.name
-		LIMIT ?`, query, like, like, like, query, limit).Scan(&maintainerRows).Error; err != nil {
+		LIMIT ? OFFSET ?`, query, like, like, like, query, limit, maintainersOffset).Scan(&maintainerRows).Error; err != nil {
 		s.logger.Printf("web-bff: search maintainers error: %v", err)
 		http.Error(w, "failed to search maintainers", http.StatusInternalServerError)
 		return
@@ -2537,13 +2572,25 @@ func (s *server) handleSearchPostgres(w http.ResponseWriter, query string, limit
 	}
 
 	var companies []model.Company
+	var companiesTotal int64
+	if err := s.store.DB().Raw(`
+		SELECT COUNT(*)
+		FROM companies
+		WHERE deleted_at IS NULL
+		  AND (unaccent(name) ILIKE unaccent(?)
+		   OR similarity(unaccent(name), unaccent(?)) > 0.2)`, like, query).Scan(&companiesTotal).Error; err != nil {
+		s.logger.Printf("web-bff: search companies total error: %v", err)
+		http.Error(w, "failed to search companies", http.StatusInternalServerError)
+		return
+	}
 	if err := s.store.DB().Raw(`
 		SELECT id, name
 		FROM companies
-		WHERE unaccent(name) ILIKE unaccent(?)
-		   OR similarity(unaccent(name), unaccent(?)) > 0.2
+		WHERE deleted_at IS NULL
+		  AND (unaccent(name) ILIKE unaccent(?)
+		   OR similarity(unaccent(name), unaccent(?)) > 0.2)
 		ORDER BY similarity(unaccent(name), unaccent(?)) DESC, name
-		LIMIT ?`, like, query, query, limit).Scan(&companies).Error; err != nil {
+		LIMIT ? OFFSET ?`, like, query, query, limit, companiesOffset).Scan(&companies).Error; err != nil {
 		s.logger.Printf("web-bff: search companies error: %v", err)
 		http.Error(w, "failed to search companies", http.StatusInternalServerError)
 		return
@@ -2562,15 +2609,33 @@ func (s *server) handleSearchPostgres(w http.ResponseWriter, query string, limit
 		Projects:    projectResults,
 		Maintainers: maintainerResults,
 		Companies:   companyResults,
+		ProjectsTotal: projectsTotal,
+		MaintainersTotal: maintainersTotal,
+		CompaniesTotal: companiesTotal,
 	}); err != nil {
 		s.logger.Printf("web-bff: handleSearch encode error: %v", err)
 	}
 }
 
-func (s *server) handleSearchFallback(w http.ResponseWriter, query string, limit int) {
+func (s *server) handleSearchFallback(w http.ResponseWriter, query string, limit int, projectsOffset int, maintainersOffset int, companiesOffset int) {
 	like := "%" + strings.ToLower(query) + "%"
 
+	var projectsTotal int64
 	var projects []model.Project
+	if err := s.store.DB().
+		Select("id, name, git_hub_org, onboarding_issue, maintainer_ref, dot_project_yaml_ref").
+		Where(
+			"LOWER(name) LIKE ? OR LOWER(maintainer_ref) LIKE ? OR LOWER(dot_project_yaml_ref) LIKE ? OR LOWER(git_hub_org) LIKE ?",
+			like,
+			like,
+			like,
+			like,
+		).
+		Count(&projectsTotal).Error; err != nil {
+		s.logger.Printf("web-bff: search projects total error: %v", err)
+		http.Error(w, "failed to search projects", http.StatusInternalServerError)
+		return
+	}
 	if err := s.store.DB().
 		Select("id, name, git_hub_org, onboarding_issue, maintainer_ref, dot_project_yaml_ref").
 		Where(
@@ -2582,6 +2647,7 @@ func (s *server) handleSearchFallback(w http.ResponseWriter, query string, limit
 		).
 		Order("name").
 		Limit(limit).
+		Offset(projectsOffset).
 		Find(&projects).Error; err != nil {
 		s.logger.Printf("web-bff: search projects error: %v", err)
 		http.Error(w, "failed to search projects", http.StatusInternalServerError)
@@ -2601,6 +2667,20 @@ func (s *server) handleSearchFallback(w http.ResponseWriter, query string, limit
 	}
 
 	var maintainers []model.Maintainer
+	var maintainersTotal int64
+	if err := s.store.DB().
+		Preload("Company").
+		Where(
+			"LOWER(name) LIKE ? OR LOWER(email) LIKE ? OR LOWER(git_hub_account) LIKE ?",
+			like,
+			like,
+			like,
+		).
+		Count(&maintainersTotal).Error; err != nil {
+		s.logger.Printf("web-bff: search maintainers total error: %v", err)
+		http.Error(w, "failed to search maintainers", http.StatusInternalServerError)
+		return
+	}
 	if err := s.store.DB().
 		Preload("Company").
 		Where(
@@ -2611,6 +2691,7 @@ func (s *server) handleSearchFallback(w http.ResponseWriter, query string, limit
 		).
 		Order("name").
 		Limit(limit).
+		Offset(maintainersOffset).
 		Find(&maintainers).Error; err != nil {
 		s.logger.Printf("web-bff: search maintainers error: %v", err)
 		http.Error(w, "failed to search maintainers", http.StatusInternalServerError)
@@ -2631,10 +2712,19 @@ func (s *server) handleSearchFallback(w http.ResponseWriter, query string, limit
 	}
 
 	var companies []model.Company
+	var companiesTotal int64
+	if err := s.store.DB().
+		Where("LOWER(name) LIKE ?", like).
+		Count(&companiesTotal).Error; err != nil {
+		s.logger.Printf("web-bff: search companies total error: %v", err)
+		http.Error(w, "failed to search companies", http.StatusInternalServerError)
+		return
+	}
 	if err := s.store.DB().
 		Where("LOWER(name) LIKE ?", like).
 		Order("name").
 		Limit(limit).
+		Offset(companiesOffset).
 		Find(&companies).Error; err != nil {
 		s.logger.Printf("web-bff: search companies error: %v", err)
 		http.Error(w, "failed to search companies", http.StatusInternalServerError)
@@ -2654,6 +2744,9 @@ func (s *server) handleSearchFallback(w http.ResponseWriter, query string, limit
 		Projects:    projectResults,
 		Maintainers: maintainerResults,
 		Companies:   companyResults,
+		ProjectsTotal: projectsTotal,
+		MaintainersTotal: maintainersTotal,
+		CompaniesTotal: companiesTotal,
 	}); err != nil {
 		s.logger.Printf("web-bff: handleSearch encode error: %v", err)
 	}

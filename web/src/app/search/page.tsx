@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { Pagination } from "clo-ui/components/Pagination";
 import AppShell from "@/components/AppShell";
 import styles from "./page.module.css";
 
@@ -33,6 +34,9 @@ type SearchResponse = {
   projects: SearchProject[];
   maintainers: SearchMaintainer[];
   companies: SearchCompany[];
+  projectsTotal: number;
+  maintainersTotal: number;
+  companiesTotal: number;
 };
 
 export default function GlobalSearchPage() {
@@ -41,6 +45,10 @@ export default function GlobalSearchPage() {
   const [results, setResults] = useState<SearchResponse | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "ready">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [projectsPage, setProjectsPage] = useState(1);
+  const [maintainersPage, setMaintainersPage] = useState(1);
+  const [companiesPage, setCompaniesPage] = useState(1);
+  const limit = 20;
 
   const bffBaseUrl = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_BFF_BASE_URL || "/api";
@@ -57,6 +65,12 @@ export default function GlobalSearchPage() {
   }, [bffBaseUrl]);
 
   useEffect(() => {
+    setProjectsPage(1);
+    setMaintainersPage(1);
+    setCompaniesPage(1);
+  }, [query]);
+
+  useEffect(() => {
     let alive = true;
     if (!query) {
       setResults(null);
@@ -69,7 +83,7 @@ export default function GlobalSearchPage() {
       setError(null);
       try {
         const response = await fetch(
-          `${apiBaseUrl}/search?query=${encodeURIComponent(query)}`,
+          `${apiBaseUrl}/search?query=${encodeURIComponent(query)}&projectsPage=${projectsPage}&maintainersPage=${maintainersPage}&companiesPage=${companiesPage}`,
           { credentials: "include" }
         );
         if (!response.ok) {
@@ -99,7 +113,7 @@ export default function GlobalSearchPage() {
     return () => {
       alive = false;
     };
-  }, [apiBaseUrl, query]);
+  }, [apiBaseUrl, query, projectsPage, maintainersPage, companiesPage]);
 
   const hasQuery = query.length > 0;
   const hasResults =
@@ -107,6 +121,11 @@ export default function GlobalSearchPage() {
     (results.projects.length > 0 ||
       results.maintainers.length > 0 ||
       results.companies.length > 0);
+  const showRefineNotice =
+    results &&
+    (results.projectsTotal > 200 ||
+      results.maintainersTotal > 200 ||
+      results.companiesTotal > 200);
 
   return (
     <AppShell>
@@ -114,7 +133,14 @@ export default function GlobalSearchPage() {
         <header className={styles.header}>
           <h1>Global Search</h1>
           <p>Search projects, maintainers, and companies.</p>
+          <p className={styles.note}>
+            Results are a quick finder, not an exhaustive database scan. Refine your query for
+            deeper coverage.
+          </p>
           {hasQuery ? <div className={styles.query}>Query: “{query}”</div> : null}
+          {showRefineNotice ? (
+            <div className={styles.refine}>Large result set — refine your query.</div>
+          ) : null}
         </header>
 
         {!hasQuery ? (
@@ -127,7 +153,14 @@ export default function GlobalSearchPage() {
           <div className={styles.results}>
             {results?.projects.length ? (
               <section className={styles.section}>
-                <h2>Projects</h2>
+                <div className={styles.sectionHeader}>
+                  <h2>Projects</h2>
+                  <span className={styles.sectionCount}>
+                    {(projectsPage - 1) * limit + 1}-
+                    {Math.min(projectsPage * limit, results.projectsTotal)} of{" "}
+                    {results.projectsTotal}
+                  </span>
+                </div>
                 <ul>
                   {results.projects.map((project) => (
                     <li key={project.id}>
@@ -138,12 +171,30 @@ export default function GlobalSearchPage() {
                     </li>
                   ))}
                 </ul>
+                {results.projectsTotal > limit ? (
+                  <div className={styles.paginationRow}>
+                    <Pagination
+                      limit={limit}
+                      total={results.projectsTotal}
+                      offset={(projectsPage - 1) * limit}
+                      active={projectsPage}
+                      onChange={(next) => setProjectsPage(next)}
+                    />
+                  </div>
+                ) : null}
               </section>
             ) : null}
 
             {results?.maintainers.length ? (
               <section className={styles.section}>
-                <h2>Maintainers</h2>
+                <div className={styles.sectionHeader}>
+                  <h2>Maintainers</h2>
+                  <span className={styles.sectionCount}>
+                    {(maintainersPage - 1) * limit + 1}-
+                    {Math.min(maintainersPage * limit, results.maintainersTotal)} of{" "}
+                    {results.maintainersTotal}
+                  </span>
+                </div>
                 <ul>
                   {results.maintainers.map((maintainer) => (
                     <li key={maintainer.id}>
@@ -160,12 +211,30 @@ export default function GlobalSearchPage() {
                     </li>
                   ))}
                 </ul>
+                {results.maintainersTotal > limit ? (
+                  <div className={styles.paginationRow}>
+                    <Pagination
+                      limit={limit}
+                      total={results.maintainersTotal}
+                      offset={(maintainersPage - 1) * limit}
+                      active={maintainersPage}
+                      onChange={(next) => setMaintainersPage(next)}
+                    />
+                  </div>
+                ) : null}
               </section>
             ) : null}
 
             {results?.companies.length ? (
               <section className={styles.section}>
-                <h2>Companies</h2>
+                <div className={styles.sectionHeader}>
+                  <h2>Companies</h2>
+                  <span className={styles.sectionCount}>
+                    {(companiesPage - 1) * limit + 1}-
+                    {Math.min(companiesPage * limit, results.companiesTotal)} of{" "}
+                    {results.companiesTotal}
+                  </span>
+                </div>
                 <ul>
                   {results.companies.map((company) => (
                     <li key={company.id}>
@@ -173,6 +242,17 @@ export default function GlobalSearchPage() {
                     </li>
                   ))}
                 </ul>
+                {results.companiesTotal > limit ? (
+                  <div className={styles.paginationRow}>
+                    <Pagination
+                      limit={limit}
+                      total={results.companiesTotal}
+                      offset={(companiesPage - 1) * limit}
+                      active={companiesPage}
+                      onChange={(next) => setCompaniesPage(next)}
+                    />
+                  </div>
+                ) : null}
               </section>
             ) : null}
 
