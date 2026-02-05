@@ -371,6 +371,7 @@ help:
 	@echo "make sops-apply-bootstrap-secrets -> apply bootstrap secrets from SOPS"
 	@echo "make deploy-web -> apply web-bff/web services + deployments + ingress + cert"
 	@echo "make web-image-set TAG=... -> set maintainerd-web image to a specific tag"
+	@echo "make web-release TAG=... -> build+push web & web-bff with same tag, then set both images"
 	@echo "make clean-env       -> remove $(ENVOUT)"
 	@echo "make print           -> show which keys would be loaded (without values)"
 	@echo "make mntrd-image-build  -> build maintainerd image $(IMAGE) locally"
@@ -813,6 +814,16 @@ web-bff-image-set:
 	@echo "Setting maintainerd-web-bff image to $(WEB_BFF_IMAGE_REPO):$(TAG) [ns=$(NAMESPACE)]"
 	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) \
 		set image deploy/maintainerd-web-bff web-bff=$(WEB_BFF_IMAGE_REPO):$(TAG)
+
+.PHONY: web-release
+web-release:
+	@if [ -z "$(TAG)" ]; then \
+		echo "Usage: make web-release TAG=<tag>"; exit 1; \
+	fi
+	@$(MAKE) web-image-push TAG=$(TAG)
+	@$(MAKE) web-bff-image-push TAG=$(TAG)
+	@$(MAKE) web-image-set TAG=$(TAG)
+	@$(MAKE) web-bff-image-set TAG=$(TAG)
 
 # Convenience combo target
 .PHONY: secrets

@@ -248,6 +248,22 @@ func main() {
 	}
 	s.fetchIssueTitle = s.fetchIssueTitleFromGitHub
 	s.fetchIssues = s.fetchOnboardingIssuesFromGitHub
+	if testMode {
+		// Avoid external GitHub calls in test mode to keep BDD tests deterministic.
+		s.fetchIssueTitle = func(_ context.Context, _, _ string, _ int) (string, error) {
+			return "[PROJECT ONBOARDING] KubeElasti", nil
+		}
+		s.fetchIssues = func(_ context.Context) ([]onboardingIssueSummary, error) {
+			return []onboardingIssueSummary{
+				{
+					Number:      123,
+					Title:       "[PROJECT ONBOARDING] KubeElasti",
+					URL:         "https://github.com/cncf/sandbox/issues/123",
+					ProjectName: "KubeElasti",
+				},
+			}, nil
+		}
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
@@ -1146,7 +1162,7 @@ func (s *server) handleProjectCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "onboardingIssue must be from github.com/cncf/sandbox", http.StatusBadRequest)
 		return
 	}
-	if s.githubToken == "" {
+	if s.githubToken == "" && !s.testMode {
 		http.Error(w, "github api token not configured", http.StatusInternalServerError)
 		return
 	}
@@ -2000,7 +2016,30 @@ func (s *server) handleMaintainerFromRef(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "missing required fields", http.StatusBadRequest)
 		return
 	}
-	maintainer, err := s.store.CreateMaintainer(req.ProjectID, req.Name, req.Email, req.GitHubHandle, req.Company)
+
+	var before *model.Maintainer
+	if req.GitHubHandle != "" {
+		var existing model.Maintainer
+		err := s.store.DB().Where("LOWER(git_hub_account) = ?", strings.ToLower(req.GitHubHandle)).First(&existing).Error
+		if err == nil {
+			before = &existing
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			http.Error(w, "failed to load maintainer", http.StatusInternalServerError)
+			return
+		}
+	}
+	if before == nil && req.Email != "" {
+		var existing model.Maintainer
+		err := s.store.DB().Where("LOWER(email) = ?", strings.ToLower(req.Email)).First(&existing).Error
+		if err == nil {
+			before = &existing
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			http.Error(w, "failed to load maintainer", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	maintainer, err := s.store.UpsertMaintainer(req.ProjectID, req.Name, req.Email, req.GitHubHandle, req.Company)
 	if err != nil {
 		if errors.Is(err, db.ErrProjectNotFound) {
 			http.Error(w, "project not found", http.StatusNotFound)
@@ -2009,6 +2048,118 @@ func (s *server) handleMaintainerFromRef(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "failed to create maintainer", http.StatusInternalServerError)
 		return
 	}
+
+	staffID := lookupStaffID(s.store, session.Login)
+	staffName := session.Login
+	if staffID != nil {
+		var staff model.StaffMember
+		if err := s.store.DB().First(&staff, *staffID).Error; err == nil && staff.Name != "" {
+			staffName = staff.Name
+		}
+	}
+
+	changes := map[string]map[string]string{}
+	if before == nil {
+		if req.Name != "" {
+			changes["name"] = map[string]string{"to": req.Name}
+		}
+		if req.Email != "" {
+			changes["email"] = map[string]string{"to": req.Email}
+		}
+		if req.GitHubHandle != "" {
+			changes["github"] = map[string]string{"to": req.GitHubHandle}
+		}
+		if req.Company != "" {
+			changes["company"] = map[string]string{"to": req.Company}
+		}
+	} else {
+		beforeName := strings.TrimSpace(before.Name)
+		afterName := strings.TrimSpace(maintainer.Name)
+		if beforeName == "" {
+			beforeName = "NAME_MISSING"
+		}
+		if afterName == "" {
+			afterName = "NAME_MISSING"
+		}
+		if beforeName != afterName {
+			changes["name"] = map[string]string{"from": beforeName, "to": afterName}
+		}
+		beforeEmail := normalizeValue(before.Email, "EMAIL_MISSING")
+		afterEmail := normalizeValue(maintainer.Email, "EMAIL_MISSING")
+		if beforeEmail != afterEmail {
+			changes["email"] = map[string]string{"from": beforeEmail, "to": afterEmail}
+		}
+		beforeGitHub := normalizeValue(before.GitHubAccount, "GITHUB_MISSING")
+		afterGitHub := normalizeValue(maintainer.GitHubAccount, "GITHUB_MISSING")
+		if beforeGitHub != afterGitHub {
+			changes["github"] = map[string]string{"from": beforeGitHub, "to": afterGitHub}
+		}
+		beforeCompany := ""
+		if before.CompanyID != nil {
+			var company model.Company
+			if err := s.store.DB().First(&company, *before.CompanyID).Error; err == nil {
+				beforeCompany = strings.TrimSpace(company.Name)
+			}
+		}
+		afterCompany := strings.TrimSpace(maintainer.Company.Name)
+		if afterCompany == "" && maintainer.CompanyID != nil {
+			var company model.Company
+			if err := s.store.DB().First(&company, *maintainer.CompanyID).Error; err == nil {
+				afterCompany = strings.TrimSpace(company.Name)
+			}
+		}
+		if afterCompany == "" && strings.TrimSpace(req.Company) != "" {
+			afterCompany = strings.TrimSpace(req.Company)
+		}
+		if beforeCompany == "" {
+			beforeCompany = "COMPANY_MISSING"
+		}
+		if afterCompany == "" {
+			afterCompany = "COMPANY_MISSING"
+		}
+		if beforeCompany != afterCompany {
+			changes["company"] = map[string]string{"from": beforeCompany, "to": afterCompany}
+		}
+	}
+
+	if len(changes) > 0 {
+		metadata := map[string]any{
+			"actor": map[string]string{
+				"login": session.Login,
+				"role":  session.Role,
+			},
+			"changes": changes,
+		}
+		fieldNames := make([]string, 0, len(changes))
+		for field := range changes {
+			fieldNames = append(fieldNames, field)
+		}
+		sort.Strings(fieldNames)
+		message := fmt.Sprintf("Maintainer updated by %s", staffName)
+		action := "MAINTAINER_UPDATE"
+		if before == nil {
+			message = fmt.Sprintf("Maintainer created by %s", staffName)
+			action = "MAINTAINER_CREATE"
+		} else if len(fieldNames) > 0 {
+			message = fmt.Sprintf("Maintainer [%s] updated by %s", strings.Join(fieldNames, ", "), staffName)
+		}
+		if metadataJSON, err := json.Marshal(metadata); err != nil {
+			s.logger.Printf("web-bff: add maintainer audit metadata encode error: %v", err)
+		} else {
+			event := model.AuditLog{
+				ProjectID:    &req.ProjectID,
+				MaintainerID: &maintainer.ID,
+				StaffID:      staffID,
+				Action:       action,
+				Message:      message,
+				Metadata:     string(metadataJSON),
+			}
+			if err := s.store.DB().Create(&event).Error; err != nil {
+				s.logger.Printf("web-bff: add maintainer audit log failed: %v", err)
+			}
+		}
+	}
+
 	response := addMaintainerResponse{
 		ID:     maintainer.ID,
 		Name:   maintainer.Name,
@@ -2294,7 +2445,7 @@ func (s *server) handleOnboardingIssues(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	if s.githubToken == "" {
+	if s.githubToken == "" && !s.testMode {
 		s.logger.Printf("web-bff: onboarding issues error: github api token not configured")
 		http.Error(w, "github api token not configured", http.StatusInternalServerError)
 		return

@@ -23,7 +23,7 @@ type Store interface {
 	LogAuditEvent(logger *zap.SugaredLogger, event model.AuditLog) error
 	GetMaintainerMapByGitHubAccount() (map[string]model.Maintainer, error)
 	CreateServiceTeamForUser(interface{ any }) (*model.ServiceTeam, error)
-	CreateMaintainer(projectID uint, name, email, githubHandle, company string) (*model.Maintainer, error)
+	UpsertMaintainer(projectID uint, name, email, githubHandle, company string) (*model.Maintainer, error)
 	CreateCompany(name string) (*model.Company, error)
 	UpdateProjectMaturity(projectID uint, maturity model.Maturity) error
 	UpdateProjectLegacyMaintainerRef(projectID uint, ref string) error
