@@ -289,6 +289,17 @@ export default function ProjectsList({ limit = 10 }: ProjectsListProps) {
   return (
     <div className={styles.card}>
       <div className={styles.header}>
+        {total > limit ? (
+          <div className={styles.paginationTop}>
+            <Pagination
+              limit={limit}
+              total={total}
+              offset={(page - 1) * limit}
+              active={page}
+              onChange={(next) => setPage(next)}
+            />
+          </div>
+        ) : null}
         <div className={styles.headerLeft}>
           <div className={styles.filterRow}>
             <span className={styles.filterLabel}>Maturity</span>
@@ -307,6 +318,8 @@ export default function ProjectsList({ limit = 10 }: ProjectsListProps) {
                 {value === "all" ? "All" : value}
               </button>
             ))}
+          </div>
+          <div className={styles.resultsRow}>
             <span className={styles.resultsInline}>
               {(page - 1) * limit + 1}-{Math.min(page * limit, total)} of {total}
             </span>
@@ -380,17 +393,6 @@ export default function ProjectsList({ limit = 10 }: ProjectsListProps) {
             </div>
           ) : null}
         </div>
-        {total > limit ? (
-          <div className={styles.paginationTop}>
-            <Pagination
-              limit={limit}
-              total={total}
-              offset={(page - 1) * limit}
-              active={page}
-              onChange={(next) => setPage(next)}
-            />
-          </div>
-        ) : null}
       </div>
       {error ? <div className={styles.banner}>{error}</div> : null}
       {status === "loading" && projects.length === 0 ? (

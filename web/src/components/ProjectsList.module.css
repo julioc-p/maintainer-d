@@ -50,6 +50,10 @@
   margin-left: 6px;
 }
 
+.resultsRow {
+  margin-top: 6px;
+}
+
 .mobileFiltersToggle {
   display: none;
   margin-top: 12px;
@@ -259,12 +263,35 @@
     display: flex;
   }
 
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .paginationTop {
     justify-content: flex-start;
   }
 
   .filterRow {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .resultsRow {
+    margin-top: 8px;
+  }
+
+  .filterRow::-webkit-scrollbar {
+    display: none;
+  }
+
+  .filterLabel {
+    display: none;
+  }
+
+  .filterChip {
+    white-space: nowrap;
   }
 
   .mobileFiltersToggle {
@@ -273,5 +300,11 @@
 
   .mobileFiltersPanel {
     display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .mobileFiltersPanel .filterInput {
+    width: 100%;
   }
 }
