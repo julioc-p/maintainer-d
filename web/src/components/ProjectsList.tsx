@@ -4,6 +4,7 @@ import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Pagination } from "clo-ui/components/Pagination";
 import styles from "./ProjectsList.module.css";
+import ProjectCard from "./ProjectCard";
 
 type RecentProject = {
   id: number;
@@ -37,6 +38,7 @@ export default function ProjectsList({ limit = 10 }: ProjectsListProps) {
   const [debouncedProjectNameFilter, setDebouncedProjectNameFilter] = useState("");
   const [debouncedMaintainerFilter, setDebouncedMaintainerFilter] = useState("");
   const [debouncedMaintainerFileFilter, setDebouncedMaintainerFileFilter] = useState("");
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<
     "projectName" | "maintainer" | "maintainerFile" | null
   >(null);
@@ -309,6 +311,74 @@ export default function ProjectsList({ limit = 10 }: ProjectsListProps) {
               {(page - 1) * limit + 1}-{Math.min(page * limit, total)} of {total}
             </span>
           </div>
+          <div className={styles.mobileFiltersToggle}>
+            <button
+              type="button"
+              className={styles.mobileFiltersButton}
+              onClick={() => setMobileFiltersOpen((current) => !current)}
+              aria-expanded={mobileFiltersOpen}
+            >
+              {mobileFiltersOpen ? "Hide filters" : "Show filters"}
+            </button>
+          </div>
+          {mobileFiltersOpen ? (
+            <div className={styles.mobileFiltersPanel}>
+              <label className={styles.mobileFilterField}>
+                <span>Project</span>
+                <input
+                  ref={projectNameRef}
+                  className={styles.filterInput}
+                  placeholder="Filter project"
+                  value={projectNameFilter}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    startTransition(() => {
+                      setActiveFilter("projectName");
+                      setProjectNameFilter(value);
+                      setPage(1);
+                    });
+                  }}
+                  onFocus={() => setActiveFilter("projectName")}
+                />
+              </label>
+              <label className={styles.mobileFilterField}>
+                <span>Maintainer</span>
+                <input
+                  ref={maintainerRef}
+                  className={styles.filterInput}
+                  placeholder="Filter maintainer"
+                  value={maintainerFilter}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    startTransition(() => {
+                      setActiveFilter("maintainer");
+                      setMaintainerFilter(value);
+                      setPage(1);
+                    });
+                  }}
+                  onFocus={() => setActiveFilter("maintainer")}
+                />
+              </label>
+              <label className={styles.mobileFilterField}>
+                <span>Maintainer file</span>
+                <input
+                  ref={maintainerFileRef}
+                  className={styles.filterInput}
+                  placeholder="Filter maintainer file"
+                  value={maintainerFileFilter}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    startTransition(() => {
+                      setActiveFilter("maintainerFile");
+                      setMaintainerFileFilter(value);
+                      setPage(1);
+                    });
+                  }}
+                  onFocus={() => setActiveFilter("maintainerFile")}
+                />
+              </label>
+            </div>
+          ) : null}
         </div>
         {total > limit ? (
           <div className={styles.paginationTop}>
@@ -489,6 +559,29 @@ export default function ProjectsList({ limit = 10 }: ProjectsListProps) {
               )}
             </tbody>
           </table>
+          <div className={styles.cardList}>
+            {projects.length === 0 ? (
+              <div className={styles.emptyRow}>No projects match these filters.</div>
+            ) : (
+              projects.map((project) => {
+                return (
+                  <ProjectCard
+                    key={project.id}
+                    id={project.id}
+                    name={project.name}
+                    maturity={project.maturity}
+                    onboardingIssue={project.onboardingIssue}
+                    onboardingIssueStatus={project.onboardingIssueStatus}
+                    legacyMaintainerRef={project.legacyMaintainerRef}
+                    githubOrg={project.githubOrg}
+                    dotProjectYamlRef={project.dotProjectYamlRef}
+                    maintainers={project.maintainers}
+                    maintainerFilter={maintainerFilter}
+                  />
+                );
+              })
+            )}
+          </div>
         </>
       )}
     </div>
