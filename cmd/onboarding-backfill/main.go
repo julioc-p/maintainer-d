@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -78,6 +77,7 @@ func main() {
 		nameKey := strings.ToLower(strings.TrimSpace(project.Name))
 		candidates := issueMap[nameKey]
 		if len(candidates) == 0 {
+			log.Printf("no onboarding issue found for project %q (id=%d)", project.Name, project.ID)
 			skipped++
 			continue
 		}
@@ -116,7 +116,7 @@ func fetchOnboardingIssues(ctx context.Context, token string) ([]issueMatch, err
 	client := github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(&oauth2.Token{
 		AccessToken: token,
 	})))
-	query := `repo:cncf/sandbox is:issue state:open label:"project onboarding"`
+	query := `repo:cncf/sandbox is:issue label:"project onboarding"`
 	options := &github.SearchOptions{ListOptions: github.ListOptions{PerPage: 100}}
 	issues := make([]issueMatch, 0, 128)
 	for {
@@ -128,6 +128,7 @@ func fetchOnboardingIssues(ctx context.Context, token string) ([]issueMatch, err
 			title := issue.GetTitle()
 			projectName, err := onboarding.GetProjectNameFromProjectTitle(title)
 			if err != nil {
+				log.Printf("skip issue %d: title=%q parse error: %v", issue.GetNumber(), title, err)
 				continue
 			}
 			issues = append(issues, issueMatch{

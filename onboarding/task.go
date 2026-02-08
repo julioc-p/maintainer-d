@@ -16,7 +16,7 @@ type Task struct {
 }
 
 // GetProjectNameFromProjectTitle extracts the project name from an issue title in the format
-// "[PROJECT ONBOARDING] <project name>".
+// "PROJECT ONBOARDING] <project name>".
 func GetProjectNameFromProjectTitle(title string) (string, error) {
 	const titlePrefix = "PROJECT ONBOARDING]"
 	if title == "" {
