@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { Card } from "clo-ui/components/Card";
 import styles from "./MaintainerCard.module.css";
@@ -85,6 +86,8 @@ export default function MaintainerCard({
   const displayName = name || "Unknown maintainer";
   const hasEmail = email && email !== "—";
   const githubHandle = github && github !== "—" ? github : "";
+  const [copyNotice, setCopyNotice] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleCopyEmail = async () => {
     if (!hasEmail) {
       return;
@@ -92,6 +95,11 @@ export default function MaintainerCard({
     const value = `${displayName} <${email}>`;
     try {
       await navigator.clipboard.writeText(value);
+      setCopyNotice(true);
+      if (copyTimer.current) {
+        clearTimeout(copyTimer.current);
+      }
+      copyTimer.current = setTimeout(() => setCopyNotice(false), 1500);
     } catch {
       // no-op: clipboard might be unavailable
     }
@@ -142,6 +150,7 @@ export default function MaintainerCard({
                     />
                   </svg>
                 </button>
+                {copyNotice ? <span className={styles.copyToast}>Copied</span> : null}
               </span>
             </div>
           ) : null}

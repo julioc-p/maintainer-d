@@ -275,12 +275,14 @@ func main() {
 	mux.Handle("/api/projects", s.withCORS(s.requireSession(http.HandlerFunc(s.handleProjects))))
 	mux.Handle("/api/projects/recent", s.withCORS(s.requireSession(http.HandlerFunc(s.handleRecentProjects))))
 	mux.Handle("/api/projects/", s.withCORS(s.requireSession(http.HandlerFunc(s.handleProject))))
+	mux.Handle("/api/search", s.withCORS(s.requireSession(http.HandlerFunc(s.handleSearch))))
 	mux.Handle("/api/maintainers/status", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMaintainerStatusUpdate))))
 	mux.Handle("/api/maintainers/from-ref", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMaintainerFromRef))))
 	mux.Handle("/api/maintainers/", s.withCORS(s.requireSession(http.HandlerFunc(s.handleMaintainer))))
 	mux.Handle("/api/audit", s.withCORS(s.requireSession(http.HandlerFunc(s.handleAudit))))
 	mux.Handle("/api/companies/merge", s.withCORS(s.requireSession(http.HandlerFunc(s.handleCompanyMerge))))
 	mux.Handle("/api/companies", s.withCORS(s.requireSession(http.HandlerFunc(s.handleCompanies))))
+	mux.Handle("/api/companies/", s.withCORS(s.requireSession(http.HandlerFunc(s.handleCompany))))
 	mux.Handle("/api/onboarding/resolve", s.withCORS(s.requireSession(http.HandlerFunc(s.handleResolveOnboarding))))
 	mux.Handle("/api/onboarding/issues", s.withCORS(s.requireSession(http.HandlerFunc(s.handleOnboardingIssues))))
 	mux.Handle("/api/", s.withCORS(s.requireSession(http.HandlerFunc(s.handleAPINotImplemented))))
@@ -2195,6 +2197,58 @@ type companyDetailResponse struct {
 	MaintainerCount int64  `json:"maintainerCount"`
 }
 
+type searchProjectResult struct {
+	ID                  uint    `json:"id"`
+	Name                string  `json:"name"`
+	GitHubOrg           string  `json:"githubOrg,omitempty"`
+	OnboardingIssue     *string `json:"onboardingIssue,omitempty"`
+	LegacyMaintainerRef string  `json:"legacyMaintainerRef,omitempty"`
+	DotProjectYamlRef   string  `json:"dotProjectYamlRef,omitempty"`
+}
+
+type searchMaintainerResult struct {
+	ID       uint                               `json:"id"`
+	Name     string                             `json:"name"`
+	GitHub   string                             `json:"github"`
+	Email    string                             `json:"email,omitempty"`
+	Company  string                             `json:"company,omitempty"`
+	Projects []companyMaintainerProjectResponse `json:"projects,omitempty"`
+}
+
+type searchCompanyResult struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+}
+
+type searchResponse struct {
+	Query            string                   `json:"query"`
+	Projects         []searchProjectResult    `json:"projects"`
+	Maintainers      []searchMaintainerResult `json:"maintainers"`
+	Companies        []searchCompanyResult    `json:"companies"`
+	ProjectsTotal    int64                    `json:"projectsTotal"`
+	MaintainersTotal int64                    `json:"maintainersTotal"`
+	CompaniesTotal   int64                    `json:"companiesTotal"`
+}
+
+type companyMaintainerProjectResponse struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+}
+
+type companyMaintainerResponse struct {
+	ID       uint                               `json:"id"`
+	Name     string                             `json:"name"`
+	GitHub   string                             `json:"github"`
+	Email    string                             `json:"email,omitempty"`
+	Projects []companyMaintainerProjectResponse `json:"projects"`
+}
+
+type companyMaintainersResponse struct {
+	ID          uint                        `json:"id"`
+	Name        string                      `json:"name"`
+	Maintainers []companyMaintainerResponse `json:"maintainers"`
+}
+
 type companyDuplicateGroup struct {
 	Canonical string                  `json:"canonical"`
 	Variants  []companyDetailResponse `json:"variants"`
@@ -2332,6 +2386,415 @@ func (s *server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 		}
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *server) handleCompany(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id, err := parseIDParam(r.URL.Path, "/api/companies/")
+	if err != nil {
+		http.Error(w, "invalid company id", http.StatusBadRequest)
+		return
+	}
+	session := sessionFromContext(r.Context())
+	if session == nil || session.Role != roleStaff {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	var company model.Company
+	if err := s.store.DB().First(&company, id).Error; err != nil {
+		http.Error(w, "company not found", http.StatusNotFound)
+		return
+	}
+
+	var maintainers []model.Maintainer
+	if err := s.store.DB().
+		Preload("Projects").
+		Where("company_id = ?", id).
+		Order("name").
+		Find(&maintainers).Error; err != nil {
+		s.logger.Printf("web-bff: handleCompany maintainers error: %v", err)
+		http.Error(w, "failed to load maintainers", http.StatusInternalServerError)
+		return
+	}
+
+	maintainerResults := make([]companyMaintainerResponse, 0, len(maintainers))
+	for _, maintainer := range maintainers {
+		projects := make([]companyMaintainerProjectResponse, 0, len(maintainer.Projects))
+		for _, project := range maintainer.Projects {
+			projects = append(projects, companyMaintainerProjectResponse{
+				ID:   project.ID,
+				Name: project.Name,
+			})
+		}
+		maintainerResults = append(maintainerResults, companyMaintainerResponse{
+			ID:       maintainer.ID,
+			Name:     strings.TrimSpace(maintainer.Name),
+			GitHub:   normalizeValue(maintainer.GitHubAccount, "GITHUB_MISSING"),
+			Email:    normalizeValue(maintainer.Email, "EMAIL_MISSING"),
+			Projects: projects,
+		})
+	}
+
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(companyMaintainersResponse{
+		ID:          company.ID,
+		Name:        company.Name,
+		Maintainers: maintainerResults,
+	}); err != nil {
+		s.logger.Printf("web-bff: handleCompany encode error: %v", err)
+	}
+}
+
+func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	session := sessionFromContext(r.Context())
+	if session == nil || session.Role != roleStaff {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	query := strings.TrimSpace(r.URL.Query().Get("query"))
+	if query == "" {
+		http.Error(w, "query is required", http.StatusBadRequest)
+		return
+	}
+	limit := 20
+	projectsPage := parseIntParam(r, "projectsPage", 1, 1, 1000)
+	maintainersPage := parseIntParam(r, "maintainersPage", 1, 1, 1000)
+	companiesPage := parseIntParam(r, "companiesPage", 1, 1, 1000)
+	projectsOffset := (projectsPage - 1) * limit
+	maintainersOffset := (maintainersPage - 1) * limit
+	companiesOffset := (companiesPage - 1) * limit
+	if s.store.DB().Name() == "postgres" {
+		s.handleSearchPostgres(w, query, limit, projectsOffset, maintainersOffset, companiesOffset)
+		return
+	}
+	s.handleSearchFallback(w, query, limit, projectsOffset, maintainersOffset, companiesOffset)
+}
+
+func (s *server) handleSearchPostgres(w http.ResponseWriter, query string, limit int, projectsOffset int, maintainersOffset int, companiesOffset int) {
+	like := "%" + query + "%"
+
+	var projectsTotal int64
+	if err := s.store.DB().Raw(`
+		SELECT COUNT(*)
+		FROM projects
+		WHERE deleted_at IS NULL
+		  AND search_tsv @@ websearch_to_tsquery('simple', unaccent(?))`, query).Scan(&projectsTotal).Error; err != nil {
+		s.logger.Printf("web-bff: search projects total error: %v", err)
+		http.Error(w, "failed to search projects", http.StatusInternalServerError)
+		return
+	}
+
+	var projects []model.Project
+	if err := s.store.DB().Raw(`
+		SELECT id, name, git_hub_org, onboarding_issue, maintainer_ref, dot_project_yaml_ref
+		FROM projects
+		WHERE deleted_at IS NULL
+		  AND search_tsv @@ websearch_to_tsquery('simple', unaccent(?))
+		ORDER BY ts_rank_cd(search_tsv, websearch_to_tsquery('simple', unaccent(?))) DESC, name
+		LIMIT ? OFFSET ?`, query, query, limit, projectsOffset).Scan(&projects).Error; err != nil {
+		s.logger.Printf("web-bff: search projects error: %v", err)
+		http.Error(w, "failed to search projects", http.StatusInternalServerError)
+		return
+	}
+
+	projectResults := make([]searchProjectResult, 0, len(projects))
+	for _, project := range projects {
+		projectResults = append(projectResults, searchProjectResult{
+			ID:                  project.ID,
+			Name:                project.Name,
+			GitHubOrg:           strings.TrimSpace(project.GitHubOrg),
+			OnboardingIssue:     project.OnboardingIssue,
+			LegacyMaintainerRef: strings.TrimSpace(project.LegacyMaintainerRef),
+			DotProjectYamlRef:   strings.TrimSpace(project.DotProjectYamlRef),
+		})
+	}
+
+	type maintainerSearchRow struct {
+		ID            uint
+		Name          string
+		Email         string
+		GitHubAccount string `gorm:"column:git_hub_account"`
+		CompanyName   string `gorm:"column:company_name"`
+	}
+	var maintainerRows []maintainerSearchRow
+	var maintainersTotal int64
+	if err := s.store.DB().Raw(`
+		SELECT COUNT(*)
+		FROM maintainers m
+		WHERE m.deleted_at IS NULL
+		  AND (m.search_tsv @@ websearch_to_tsquery('simple', unaccent(?))
+		   OR unaccent(m.name) ILIKE unaccent(?)
+		   OR unaccent(m.email) ILIKE unaccent(?)
+		   OR unaccent(m.git_hub_account) ILIKE unaccent(?))`, query, like, like, like).Scan(&maintainersTotal).Error; err != nil {
+		s.logger.Printf("web-bff: search maintainers total error: %v", err)
+		http.Error(w, "failed to search maintainers", http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.DB().Raw(`
+		SELECT m.id, m.name, m.email, m.git_hub_account, c.name AS company_name
+		FROM maintainers m
+		LEFT JOIN companies c ON c.id = m.company_id
+		WHERE m.deleted_at IS NULL
+		  AND (m.search_tsv @@ websearch_to_tsquery('simple', unaccent(?))
+		   OR unaccent(m.name) ILIKE unaccent(?)
+		   OR unaccent(m.email) ILIKE unaccent(?)
+		   OR unaccent(m.git_hub_account) ILIKE unaccent(?))
+		ORDER BY ts_rank_cd(m.search_tsv, websearch_to_tsquery('simple', unaccent(?))) DESC, m.name
+		LIMIT ? OFFSET ?`, query, like, like, like, query, limit, maintainersOffset).Scan(&maintainerRows).Error; err != nil {
+		s.logger.Printf("web-bff: search maintainers error: %v", err)
+		http.Error(w, "failed to search maintainers", http.StatusInternalServerError)
+		return
+	}
+	maintainerResults := make([]searchMaintainerResult, 0, len(maintainerRows))
+	maintainerIDs := make([]uint, 0, len(maintainerRows))
+	for _, maintainer := range maintainerRows {
+		maintainerIDs = append(maintainerIDs, maintainer.ID)
+		result := searchMaintainerResult{
+			ID:     maintainer.ID,
+			Name:   strings.TrimSpace(maintainer.Name),
+			GitHub: normalizeValue(maintainer.GitHubAccount, "GITHUB_MISSING"),
+			Email:  normalizeValue(maintainer.Email, "EMAIL_MISSING"),
+		}
+		if maintainer.CompanyName != "" {
+			result.Company = maintainer.CompanyName
+		}
+		maintainerResults = append(maintainerResults, result)
+	}
+
+	if len(maintainerIDs) > 0 {
+		type maintainerProjectRow struct {
+			MaintainerID uint   `gorm:"column:maintainer_id"`
+			ProjectID    uint   `gorm:"column:id"`
+			ProjectName  string `gorm:"column:name"`
+		}
+		var projectRows []maintainerProjectRow
+		if err := s.store.DB().Raw(`
+			SELECT mp.maintainer_id, p.id, p.name
+			FROM maintainer_projects mp
+			JOIN projects p ON p.id = mp.project_id
+			WHERE p.deleted_at IS NULL
+			  AND mp.maintainer_id IN ?
+			ORDER BY p.name`, maintainerIDs).Scan(&projectRows).Error; err != nil {
+			s.logger.Printf("web-bff: search maintainer projects error: %v", err)
+			http.Error(w, "failed to search maintainers", http.StatusInternalServerError)
+			return
+		}
+		projectMap := make(map[uint][]companyMaintainerProjectResponse)
+		for _, row := range projectRows {
+			projectMap[row.MaintainerID] = append(projectMap[row.MaintainerID], companyMaintainerProjectResponse{
+				ID:   row.ProjectID,
+				Name: row.ProjectName,
+			})
+		}
+		for i := range maintainerResults {
+			maintainerResults[i].Projects = projectMap[maintainerResults[i].ID]
+		}
+	}
+
+	var companies []model.Company
+	var companiesTotal int64
+	if err := s.store.DB().Raw(`
+		SELECT COUNT(*)
+		FROM companies
+		WHERE deleted_at IS NULL
+		  AND (unaccent(name) ILIKE unaccent(?)
+		   OR similarity(unaccent(name), unaccent(?)) > 0.2)`, like, query).Scan(&companiesTotal).Error; err != nil {
+		s.logger.Printf("web-bff: search companies total error: %v", err)
+		http.Error(w, "failed to search companies", http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.DB().Raw(`
+		SELECT id, name
+		FROM companies
+		WHERE deleted_at IS NULL
+		  AND (unaccent(name) ILIKE unaccent(?)
+		   OR similarity(unaccent(name), unaccent(?)) > 0.2)
+		ORDER BY similarity(unaccent(name), unaccent(?)) DESC, name
+		LIMIT ? OFFSET ?`, like, query, query, limit, companiesOffset).Scan(&companies).Error; err != nil {
+		s.logger.Printf("web-bff: search companies error: %v", err)
+		http.Error(w, "failed to search companies", http.StatusInternalServerError)
+		return
+	}
+	companyResults := make([]searchCompanyResult, 0, len(companies))
+	for _, company := range companies {
+		companyResults = append(companyResults, searchCompanyResult{
+			ID:   company.ID,
+			Name: company.Name,
+		})
+	}
+
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(searchResponse{
+		Query:            query,
+		Projects:         projectResults,
+		Maintainers:      maintainerResults,
+		Companies:        companyResults,
+		ProjectsTotal:    projectsTotal,
+		MaintainersTotal: maintainersTotal,
+		CompaniesTotal:   companiesTotal,
+	}); err != nil {
+		s.logger.Printf("web-bff: handleSearch encode error: %v", err)
+	}
+}
+
+func (s *server) handleSearchFallback(w http.ResponseWriter, query string, limit int, projectsOffset int, maintainersOffset int, companiesOffset int) {
+	like := "%" + strings.ToLower(query) + "%"
+
+	var projectsTotal int64
+	var projects []model.Project
+	if err := s.store.DB().
+		Model(&model.Project{}).
+		Where(
+			"LOWER(name) LIKE ? OR LOWER(maintainer_ref) LIKE ? OR LOWER(dot_project_yaml_ref) LIKE ? OR LOWER(git_hub_org) LIKE ?",
+			like,
+			like,
+			like,
+			like,
+		).
+		Count(&projectsTotal).Error; err != nil {
+		s.logger.Printf("web-bff: search projects total error: %v", err)
+		http.Error(w, "failed to search projects", http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.DB().
+		Model(&model.Project{}).
+		Select("id, name, git_hub_org, onboarding_issue, maintainer_ref, dot_project_yaml_ref").
+		Where(
+			"LOWER(name) LIKE ? OR LOWER(maintainer_ref) LIKE ? OR LOWER(dot_project_yaml_ref) LIKE ? OR LOWER(git_hub_org) LIKE ?",
+			like,
+			like,
+			like,
+			like,
+		).
+		Order("name").
+		Limit(limit).
+		Offset(projectsOffset).
+		Find(&projects).Error; err != nil {
+		s.logger.Printf("web-bff: search projects error: %v", err)
+		http.Error(w, "failed to search projects", http.StatusInternalServerError)
+		return
+	}
+
+	projectResults := make([]searchProjectResult, 0, len(projects))
+	for _, project := range projects {
+		projectResults = append(projectResults, searchProjectResult{
+			ID:                  project.ID,
+			Name:                project.Name,
+			GitHubOrg:           strings.TrimSpace(project.GitHubOrg),
+			OnboardingIssue:     project.OnboardingIssue,
+			LegacyMaintainerRef: strings.TrimSpace(project.LegacyMaintainerRef),
+			DotProjectYamlRef:   strings.TrimSpace(project.DotProjectYamlRef),
+		})
+	}
+
+	var maintainers []model.Maintainer
+	var maintainersTotal int64
+	if err := s.store.DB().
+		Model(&model.Maintainer{}).
+		Where(
+			"LOWER(name) LIKE ? OR LOWER(email) LIKE ? OR LOWER(git_hub_account) LIKE ?",
+			like,
+			like,
+			like,
+		).
+		Count(&maintainersTotal).Error; err != nil {
+		s.logger.Printf("web-bff: search maintainers total error: %v", err)
+		http.Error(w, "failed to search maintainers", http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.DB().
+		Preload("Company").
+		Preload("Projects").
+		Where(
+			"LOWER(name) LIKE ? OR LOWER(email) LIKE ? OR LOWER(git_hub_account) LIKE ?",
+			like,
+			like,
+			like,
+		).
+		Order("name").
+		Limit(limit).
+		Offset(maintainersOffset).
+		Find(&maintainers).Error; err != nil {
+		s.logger.Printf("web-bff: search maintainers error: %v", err)
+		http.Error(w, "failed to search maintainers", http.StatusInternalServerError)
+		return
+	}
+	maintainerResults := make([]searchMaintainerResult, 0, len(maintainers))
+	for _, maintainer := range maintainers {
+		result := searchMaintainerResult{
+			ID:     maintainer.ID,
+			Name:   strings.TrimSpace(maintainer.Name),
+			GitHub: normalizeValue(maintainer.GitHubAccount, "GITHUB_MISSING"),
+			Email:  normalizeValue(maintainer.Email, "EMAIL_MISSING"),
+		}
+		if maintainer.Company.Name != "" {
+			result.Company = maintainer.Company.Name
+		}
+		if len(maintainer.Projects) > 0 {
+			projects := make([]companyMaintainerProjectResponse, 0, len(maintainer.Projects))
+			for _, project := range maintainer.Projects {
+				projects = append(projects, companyMaintainerProjectResponse{
+					ID:   project.ID,
+					Name: project.Name,
+				})
+			}
+			result.Projects = projects
+		}
+		maintainerResults = append(maintainerResults, result)
+	}
+
+	var companies []model.Company
+	var companiesTotal int64
+	if err := s.store.DB().
+		Model(&model.Company{}).
+		Where("LOWER(name) LIKE ?", like).
+		Count(&companiesTotal).Error; err != nil {
+		s.logger.Printf("web-bff: search companies total error: %v", err)
+		http.Error(w, "failed to search companies", http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.DB().
+		Where("LOWER(name) LIKE ?", like).
+		Order("name").
+		Limit(limit).
+		Offset(companiesOffset).
+		Find(&companies).Error; err != nil {
+		s.logger.Printf("web-bff: search companies error: %v", err)
+		http.Error(w, "failed to search companies", http.StatusInternalServerError)
+		return
+	}
+	companyResults := make([]searchCompanyResult, 0, len(companies))
+	for _, company := range companies {
+		companyResults = append(companyResults, searchCompanyResult{
+			ID:   company.ID,
+			Name: company.Name,
+		})
+	}
+
+	w.Header().Set(headerContentType, contentTypeJSON)
+	if err := json.NewEncoder(w).Encode(searchResponse{
+		Query:            query,
+		Projects:         projectResults,
+		Maintainers:      maintainerResults,
+		Companies:        companyResults,
+		ProjectsTotal:    projectsTotal,
+		MaintainersTotal: maintainersTotal,
+		CompaniesTotal:   companiesTotal,
+	}); err != nil {
+		s.logger.Printf("web-bff: handleSearch encode error: %v", err)
 	}
 }
 

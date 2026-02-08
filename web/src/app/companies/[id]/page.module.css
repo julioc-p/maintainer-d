@@ -1,0 +1,115 @@
+.main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 4rem;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1.5rem;
+}
+
+.header p {
+  opacity: 0.7;
+  font-size: 1.05rem;
+}
+
+.section {
+  padding: 1.5rem;
+  border-radius: 16px;
+  background: var(--md-surface, rgba(255, 255, 255, 0.7));
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.section h2 {
+  margin: 0 0 1rem;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.table th,
+.table td {
+  padding: 0.65rem 0.8rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  text-align: left;
+  vertical-align: top;
+}
+
+.table th {
+  font-weight: 600;
+}
+
+.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.filters th {
+  padding-top: 0.3rem;
+  padding-bottom: 0.6rem;
+}
+
+.filters input {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+}
+
+.email {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.copyButton {
+  border: 0;
+  background: rgba(214, 34, 147, 0.12);
+  color: #d62293;
+  padding: 4px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.copyButton:hover {
+  background: rgba(214, 34, 147, 0.2);
+}
+
+.copyIcon {
+  width: 14px;
+  height: 14px;
+}
+
+.copyToast {
+  font-size: 0.8rem;
+  color: #d62293;
+  font-weight: 600;
+}
+
+
+.empty {
+  padding: 2rem;
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.error {
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
+  background: rgba(255, 0, 0, 0.08);
+  color: #7a1c1c;
+}
