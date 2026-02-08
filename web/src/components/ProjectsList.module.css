@@ -74,6 +74,11 @@
   table-layout: fixed;
 }
 
+.tableBodyLoading {
+  opacity: 0.6;
+  transition: opacity 180ms ease-in-out;
+}
+
 .table th {
   text-align: left;
   padding: 8px 0;

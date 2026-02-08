@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Pagination } from "clo-ui/components/Pagination";
 import styles from "./ProjectsList.module.css";
@@ -34,12 +34,39 @@ export default function ProjectsList({ limit = 10 }: ProjectsListProps) {
   const [projectNameFilter, setProjectNameFilter] = useState("");
   const [maintainerFilter, setMaintainerFilter] = useState("");
   const [maintainerFileFilter, setMaintainerFileFilter] = useState("");
+  const [debouncedProjectNameFilter, setDebouncedProjectNameFilter] = useState("");
+  const [debouncedMaintainerFilter, setDebouncedMaintainerFilter] = useState("");
+  const [debouncedMaintainerFileFilter, setDebouncedMaintainerFileFilter] = useState("");
   const [activeFilter, setActiveFilter] = useState<
     "projectName" | "maintainer" | "maintainerFile" | null
   >(null);
+  const [rowMinHeight, setRowMinHeight] = useState<number | null>(null);
   const projectNameRef = useRef<HTMLInputElement>(null);
   const maintainerRef = useRef<HTMLInputElement>(null);
   const maintainerFileRef = useRef<HTMLInputElement>(null);
+  const focusRestoreScheduled = useRef(false);
+  const lastRowCountRef = useRef(0);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      setDebouncedProjectNameFilter(projectNameFilter.trim());
+    }, 350);
+    return () => window.clearTimeout(handle);
+  }, [projectNameFilter]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      setDebouncedMaintainerFilter(maintainerFilter.trim());
+    }, 350);
+    return () => window.clearTimeout(handle);
+  }, [maintainerFilter]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      setDebouncedMaintainerFileFilter(maintainerFileFilter.trim());
+    }, 350);
+    return () => window.clearTimeout(handle);
+  }, [maintainerFileFilter]);
 
   const bffBaseUrl = useMemo(() => {
     const raw = process.env.NEXT_PUBLIC_BFF_BASE_URL || "/api";
@@ -69,14 +96,14 @@ export default function ProjectsList({ limit = 10 }: ProjectsListProps) {
         if (maturityFilter !== "all") {
           params.set("maturity", maturityFilter);
         }
-        if (projectNameFilter.trim()) {
-          params.set("projectName", projectNameFilter.trim());
+        if (debouncedProjectNameFilter) {
+          params.set("projectName", debouncedProjectNameFilter);
         }
-        if (maintainerFilter.trim()) {
-          params.set("maintainer", maintainerFilter.trim());
+        if (debouncedMaintainerFilter) {
+          params.set("maintainer", debouncedMaintainerFilter);
         }
-        if (maintainerFileFilter.trim()) {
-          params.set("maintainerFile", maintainerFileFilter.trim());
+        if (debouncedMaintainerFileFilter) {
+          params.set("maintainerFile", debouncedMaintainerFileFilter);
         }
         const response = await fetch(
           `${apiBaseUrl}/projects/recent?${params.toString()}`,
@@ -117,13 +144,24 @@ export default function ProjectsList({ limit = 10 }: ProjectsListProps) {
     page,
     sortBy,
     maturityFilter,
-    projectNameFilter,
-    maintainerFilter,
-    maintainerFileFilter,
+    debouncedProjectNameFilter,
+    debouncedMaintainerFilter,
+    debouncedMaintainerFileFilter,
   ]);
 
   useEffect(() => {
+    const rowCount = projects.length === 0 ? 1 : projects.length;
+    if (rowCount !== lastRowCountRef.current) {
+      lastRowCountRef.current = rowCount;
+      setRowMinHeight(rowCount * 54);
+    }
+  }, [projects]);
+
+  useEffect(() => {
     if (status !== "ready" || !activeFilter) {
+      return;
+    }
+    if (focusRestoreScheduled.current) {
       return;
     }
     const target =
@@ -133,9 +171,15 @@ export default function ProjectsList({ limit = 10 }: ProjectsListProps) {
         ? maintainerRef.current
         : maintainerFileRef.current;
     if (target && document.activeElement !== target) {
-      target.focus({ preventScroll: true });
-      const length = target.value.length;
-      target.setSelectionRange(length, length);
+      focusRestoreScheduled.current = true;
+      requestAnimationFrame(() => {
+        if (document.activeElement !== target) {
+          target.focus({ preventScroll: true });
+          const length = target.value.length;
+          target.setSelectionRange(length, length);
+        }
+        focusRestoreScheduled.current = false;
+      });
     }
   }, [activeFilter, status, projects]);
 
@@ -279,7 +323,7 @@ export default function ProjectsList({ limit = 10 }: ProjectsListProps) {
         ) : null}
       </div>
       {error ? <div className={styles.banner}>{error}</div> : null}
-      {status === "loading" ? (
+      {status === "loading" && projects.length === 0 ? (
         <div className={styles.empty}>Loading projects…</div>
       ) : (
         <>
@@ -331,9 +375,12 @@ export default function ProjectsList({ limit = 10 }: ProjectsListProps) {
                     placeholder="Filter project"
                     value={projectNameFilter}
                     onChange={(event) => {
-                      setActiveFilter("projectName");
-                      setProjectNameFilter(event.target.value);
-                      setPage(1);
+                      const value = event.target.value;
+                      startTransition(() => {
+                        setActiveFilter("projectName");
+                        setProjectNameFilter(value);
+                        setPage(1);
+                      });
                     }}
                     onFocus={() => setActiveFilter("projectName")}
                   />
@@ -346,9 +393,12 @@ export default function ProjectsList({ limit = 10 }: ProjectsListProps) {
                     placeholder="Filter maintainer"
                     value={maintainerFilter}
                     onChange={(event) => {
-                      setActiveFilter("maintainer");
-                      setMaintainerFilter(event.target.value);
-                      setPage(1);
+                      const value = event.target.value;
+                      startTransition(() => {
+                        setActiveFilter("maintainer");
+                        setMaintainerFilter(value);
+                        setPage(1);
+                      });
                     }}
                     onFocus={() => setActiveFilter("maintainer")}
                   />
@@ -363,9 +413,12 @@ export default function ProjectsList({ limit = 10 }: ProjectsListProps) {
                     placeholder="Filter maintainer file"
                     value={maintainerFileFilter}
                     onChange={(event) => {
-                      setActiveFilter("maintainerFile");
-                      setMaintainerFileFilter(event.target.value);
-                      setPage(1);
+                      const value = event.target.value;
+                      startTransition(() => {
+                        setActiveFilter("maintainerFile");
+                        setMaintainerFileFilter(value);
+                        setPage(1);
+                      });
                     }}
                     onFocus={() => setActiveFilter("maintainerFile")}
                   />
@@ -374,7 +427,10 @@ export default function ProjectsList({ limit = 10 }: ProjectsListProps) {
                 <th className={`${styles.dotRepoCol} ${styles.filterSpacer}`}>&nbsp;</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody
+              className={status === "loading" ? styles.tableBodyLoading : undefined}
+              style={rowMinHeight ? { minHeight: `${rowMinHeight}px` } : undefined}
+            >
               {projects.length === 0 ? (
                 <tr>
                   <td colSpan={9} className={styles.emptyRow}>
