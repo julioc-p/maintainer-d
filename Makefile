@@ -27,6 +27,7 @@ BUILD_PROGRESS ?= auto
 DOCKER_BUILD_EXTRA ?=
 NPM_CONFIG_LOGLEVEL ?=
 NPM_CONFIG_REGISTRY ?=
+NO_BDD_OPEN ?= 1
 
 ifeq ($(CONTAINER_TOOL),docker)
 BUILD_PROGRESS_FLAG := --progress=$(BUILD_PROGRESS)
@@ -529,7 +530,7 @@ web-bdd-report:
 	HTML_PATH="$$BASE_DIR_ABS/web-bdd-report.html"; \
 	if [ -f "$$JSON_PATH" ]; then \
 		(cd web && node -e "require(\"cucumber-html-reporter\").generate({ jsonFile: \"$$JSON_PATH\", output: \"$$HTML_PATH\", theme: \"bootstrap\", reportSuiteAsScenarios: true, launchReport: false, metadata: { App: \"maintainer-d\", Platform: \"Web\" } });"); \
-		if [ -z "$$NO_BDD_OPEN" ] && [ -z "$$CI" ]; then \
+		if [ -z "$(NO_BDD_OPEN)" ] && [ -z "$$CI" ]; then \
 			if command -v xdg-open >/dev/null 2>&1; then xdg-open "$$HTML_PATH" >/dev/null 2>&1 || true; fi; \
 		fi; \
 	else \
@@ -548,7 +549,7 @@ test-web-report:
 	HTML_PATH="$$BASE_DIR_ABS/web-bdd-report.html"; \
 	if [ -f "$$JSON_PATH" ]; then \
 		(cd web && node -e "require(\"cucumber-html-reporter\").generate({ jsonFile: \"$$JSON_PATH\", output: \"$$HTML_PATH\", theme: \"bootstrap\", reportSuiteAsScenarios: true, launchReport: false, metadata: { App: \"maintainer-d\", Platform: \"Web\" } });"); \
-		if [ -z "$$NO_BDD_OPEN" ] && [ -z "$$CI" ]; then \
+		if [ -z "$(NO_BDD_OPEN)" ] && [ -z "$$CI" ]; then \
 			if command -v xdg-open >/dev/null 2>&1; then xdg-open "$$HTML_PATH" >/dev/null 2>&1 || true; fi; \
 		fi; \
 	else \
