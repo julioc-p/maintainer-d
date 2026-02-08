@@ -13,6 +13,8 @@ SANITIZE_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-sanitize:$(TAG)
 SANITIZE_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-sanitize:latest
 MIGRATE_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-migrate:$(TAG)
 MIGRATE_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-migrate:latest
+ONBOARDING_BACKFILL_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-onboarding-backfill:$(TAG)
+ONBOARDING_BACKFILL_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-onboarding-backfill:latest
 WEB_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web:$(TAG)
 WEB_IMAGE_LATEST ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web:latest
 WEB_BFF_IMAGE ?= $(REGISTRY)/$(GH_ORG_LC)/maintainerd-web-bff:$(TAG)
@@ -83,6 +85,11 @@ sanitize-image-build:
 migrate-image-build:
 	@echo "Building migrate image: $(MIGRATE_IMAGE)"
 	@$(CONTAINER_TOOL) build $(BUILD_PROGRESS_FLAG) $(DOCKER_BUILD_EXTRA) -t $(MIGRATE_IMAGE) -f Dockerfile --target migrate .
+
+.PHONY: onboarding-backfill-image-build
+onboarding-backfill-image-build:
+	@echo "Building onboarding backfill image: $(ONBOARDING_BACKFILL_IMAGE)"
+	@$(CONTAINER_TOOL) build $(BUILD_PROGRESS_FLAG) $(DOCKER_BUILD_EXTRA) -t $(ONBOARDING_BACKFILL_IMAGE) -f Dockerfile --target onboarding-backfill .
 
 .PHONY: web-image-build
 web-image-build:
@@ -174,6 +181,21 @@ migrate-image-push: migrate-image-build
 	@echo "Tagging and pushing latest: $(MIGRATE_IMAGE_LATEST)"
 	@$(CONTAINER_TOOL) tag $(MIGRATE_IMAGE) $(MIGRATE_IMAGE_LATEST)
 	@$(CONTAINER_TOOL) push $(MIGRATE_IMAGE_LATEST)
+
+.PHONY: onboarding-backfill-image-push
+onboarding-backfill-image-push: onboarding-backfill-image-build
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@if [ -n "$(GHCR_TOKEN)" ]; then \
+		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+	else \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
+	fi
+	@echo "Pushing image: $(ONBOARDING_BACKFILL_IMAGE)"
+	@$(CONTAINER_TOOL) push $(ONBOARDING_BACKFILL_IMAGE)
+	@echo "Tagging and pushing latest: $(ONBOARDING_BACKFILL_IMAGE_LATEST)"
+	@$(CONTAINER_TOOL) tag $(ONBOARDING_BACKFILL_IMAGE) $(ONBOARDING_BACKFILL_IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(ONBOARDING_BACKFILL_IMAGE_LATEST)
 
 .PHONY: web-image-push
 web-image-push: web-image-build
@@ -274,6 +296,11 @@ bootstrap-run-dev: ensure-ns apply-env apply-creds
 migrate-schema:
 	@echo "Running schema migration job in namespace $(NAMESPACE) [ctx=$(CTX_STR)]"
 	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/manifests/maintainerd-migrate-schema-job.yaml
+
+.PHONY: onboarding-backfill-job
+onboarding-backfill-job:
+	@echo "Running onboarding backfill job in namespace $(NAMESPACE) [ctx=$(CTX_STR)]"
+	@kubectl -n $(NAMESPACE) $(if $(KUBECONTEXT),--context $(KUBECONTEXT)) apply -f deploy/manifests/maintainerd-onboarding-backfill-job.yaml
 
 .PHONY: migrate-schema-safe
 migrate-schema-safe:
@@ -847,7 +874,7 @@ images-show:
 	@echo "  maintainerd-web-bff  $(WEB_BFF_IMAGE)"
 
 .PHONY: images-build
-images-build: mntrd-image-build sync-image-build sanitize-image-build migrate-image-build web-image-build web-bff-image-build
+images-build: mntrd-image-build sync-image-build sanitize-image-build migrate-image-build onboarding-backfill-image-build web-image-build web-bff-image-build
 	@echo "All images built."
 
 .PHONY: mntrd-image-push-only
@@ -910,6 +937,21 @@ migrate-image-push-only:
 	@$(CONTAINER_TOOL) tag $(MIGRATE_IMAGE) $(MIGRATE_IMAGE_LATEST)
 	@$(CONTAINER_TOOL) push $(MIGRATE_IMAGE_LATEST)
 
+.PHONY: onboarding-backfill-image-push-only
+onboarding-backfill-image-push-only:
+	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
+	@if [ -n "$(GHCR_TOKEN)" ]; then \
+		echo "Logging into $(REGISTRY) as $(GHCR_USER) using token from GHCR_TOKEN"; \
+		echo "$(GHCR_TOKEN)" | $(CONTAINER_TOOL) login $(REGISTRY) -u "$(GHCR_USER)" --password-stdin; \
+	else \
+		echo "GHCR_TOKEN not set; attempting push with existing auth"; \
+	fi
+	@echo "Pushing image: $(ONBOARDING_BACKFILL_IMAGE)"
+	@$(CONTAINER_TOOL) push $(ONBOARDING_BACKFILL_IMAGE)
+	@echo "Tagging and pushing latest: $(ONBOARDING_BACKFILL_IMAGE_LATEST)"
+	@$(CONTAINER_TOOL) tag $(ONBOARDING_BACKFILL_IMAGE) $(ONBOARDING_BACKFILL_IMAGE_LATEST)
+	@$(CONTAINER_TOOL) push $(ONBOARDING_BACKFILL_IMAGE_LATEST)
+
 .PHONY: web-image-push-only
 web-image-push-only:
 	@echo "Ensuring $(CONTAINER_TOOL) is logged in to $(REGISTRY) (uses GHCR_TOKEN if set)"
@@ -941,7 +983,7 @@ web-bff-image-push-only:
 	@$(CONTAINER_TOOL) push $(WEB_BFF_IMAGE_LATEST)
 
 .PHONY: images-push
-images-push: mntrd-image-push-only sync-image-push-only sanitize-image-push-only migrate-image-push-only web-image-push-only web-bff-image-push-only
+images-push: mntrd-image-push-only sync-image-push-only sanitize-image-push-only migrate-image-push-only onboarding-backfill-image-push-only web-image-push-only web-bff-image-push-only
 	@echo "All images pushed (no build)."
 
 .PHONY: clean-env
