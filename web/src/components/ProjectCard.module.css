@@ -1,73 +1,81 @@
 .card {
-  padding: 20px;
-  border-radius: 16px;
-  background: var(--md-card-bg, #ffffff);
-  box-shadow: var(--md-shadow, 0 12px 24px rgba(0, 0, 0, 0.08));
-  color: var(--md-card-text, #0f172a);
+  border: 1px solid var(--md-border, rgba(15, 23, 42, 0.08));
+  border-radius: 14px;
+  padding: 14px 16px;
+  background: #1f2937;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.06);
 }
 
-.content {
-  padding: 20px;
-}
-
-.cardHeader {
+.header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: baseline;
   gap: 12px;
+  margin-bottom: 12px;
 }
 
-.cardTitle {
-  margin: 12px 12px 12px;
+.title {
   font-size: 16px;
   font-weight: 600;
-  color: var(--md-card-text-strong, #0b1220);
-}
-
-.cardTitleLink {
-  color: inherit;
+  color: #f8fafc;
   text-decoration: none;
 }
 
-.cardTitleLink:hover {
-  text-decoration: underline;
+.title:hover {
+  color: #ff5db8;
 }
 
-.maturityChip {
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--md-chip-bg, rgba(15, 23, 42, 0.12));
+.maturity {
   font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--md-chip-text, #0b1220);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 93, 184, 0.15);
+  color: #ff5db8;
+  text-transform: capitalize;
 }
 
-.maintainersTable {
-  width: 90%;
-  border-collapse: collapse;
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
   font-size: 13px;
-  margin: 0 auto;
 }
 
-.maintainersTable th {
-  text-align: left;
+.grid dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: rgba(226, 232, 240, 0.7);
+  margin-bottom: 4px;
+}
+
+.grid dd {
+  margin: 0;
+  color: #e2e8f0;
+}
+
+.link {
+  color: #ff5db8;
   font-weight: 600;
-  padding-bottom: 6px;
-  color: var(--md-card-text-strong, #0b1220);
+  text-decoration: none;
 }
 
-.maintainersTable td {
-  padding: 6px 0;
-  border-top: 1px solid var(--md-border, rgba(15, 23, 42, 0.08));
-  color: var(--md-card-text, #0f172a);
-}
-
-.maintainerLink {
-  color: var(--md-link, #0b3d2e);
-  font-weight: 600;
-}
-
-.maintainerLink:hover {
+.link:hover {
   text-decoration: underline;
+}
+
+.matchHighlight {
+  font-weight: 700;
+  font-size: 14px;
+  color: #0b1220;
+  background: #ff5db8;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .card {
+    border-color: rgba(148, 163, 184, 0.2);
+    box-shadow: 0 16px 32px rgba(2, 6, 23, 0.5);
+  }
 }
