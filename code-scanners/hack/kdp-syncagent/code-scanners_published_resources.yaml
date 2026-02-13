@@ -7,13 +7,17 @@ spec:
   resource:
     kind: CodeScannerFossa
     apiGroup: maintainer-d.cncf.io
-    version: v1alpha1
+    versions: [v1alpha1]
+  projection:
+    group: code-scanners.maintainer-d.cncf.io
+  naming:
+    namespace: "{{ .ClusterName }}"
+    name: "{{ .Object.metadata.namespace | shortHash }}-{{ .Object.metadata.name | shortHash }}"
   related:
     - identifier: "configmap-with-code-scanner-config"
       origin: service
-      kind: ConfigMap
-      reference:
-        name:
+      object:
+        reference:
           path: spec.configMapName
 ---
 apiVersion: syncagent.kcp.io/v1alpha1
@@ -24,11 +28,15 @@ spec:
   resource:
     kind: CodeScannerSnyk
     apiGroup: maintainer-d.cncf.io
-    version: v1alpha1
+    versions: [v1alpha1]
+  projection:
+    group: code-scanners.maintainer-d.cncf.io
+  naming:
+    namespace: "{{ .ClusterName }}"
+    name: "{{ .Object.metadata.namespace | shortHash }}-{{ .Object.metadata.name | shortHash }}"
   related:
     - identifier: "configmap-with-code-scanner-config"
       origin: service
-      kind: ConfigMap
-      reference:
-        name:
+      object:
+        reference:
           path: spec.configMapName

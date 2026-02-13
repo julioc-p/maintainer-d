@@ -51,7 +51,7 @@
 
    helm install kcp-api-syncagent kcp/api-syncagent \
      --values hack/kdp-syncagent/code-scanners_api_syncagent_values.yaml \
-     --version=0.2.0 \
+     --version=0.3.0 \
      --namespace code-scanners
    ```
 
