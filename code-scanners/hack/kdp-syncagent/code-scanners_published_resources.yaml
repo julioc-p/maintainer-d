@@ -16,6 +16,7 @@ spec:
   related:
     - identifier: "configmap-with-code-scanner-config"
       origin: service
+      kind: ConfigMap
       object:
         reference:
           path: spec.configMapName
@@ -37,6 +38,7 @@ spec:
   related:
     - identifier: "configmap-with-code-scanner-config"
       origin: service
+      kind: ConfigMap
       object:
         reference:
           path: spec.configMapName
